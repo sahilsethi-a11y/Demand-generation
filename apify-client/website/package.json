@@ -1,0 +1,51 @@
+{
+    "name": "apify-client-python",
+    "scripts": {
+        "clean": "rimraf .docusaurus build",
+        "build": "yarn clean && docusaurus build",
+        "start": "yarn clean && docusaurus start",
+        "deploy": "yarn clean && docusaurus deploy",
+        "docusaurus": "docusaurus",
+        "publish-gh-pages": "docusaurus-publish",
+        "rename-version": "docusaurus rename-version",
+        "swizzle": "docusaurus swizzle",
+        "version": "docusaurus version",
+        "write-translations": "docusaurus write-translations",
+        "prettify": "prettier --write --config ./tools/docs-prettier.config.js ../docs/*.md ../docs/*.mdx",
+        "lint": "yarn lint:code",
+        "lint:fix": "yarn lint:code:fix",
+        "lint:code": "eslint .",
+        "lint:code:fix": "eslint . --fix"
+    },
+    "dependencies": {
+        "@apify/docs-theme": "^1.0.240",
+        "@apify/docusaurus-plugin-typedoc-api": "^5.1.0",
+        "@docusaurus/core": "^3.8.1",
+        "@docusaurus/faster": "^3.8.1",
+        "@docusaurus/plugin-client-redirects": "^3.8.1",
+        "@docusaurus/preset-classic": "^3.8.1",
+        "@signalwire/docusaurus-plugin-llms-txt": "^1.2.2",
+        "clsx": "^2.0.0",
+        "docusaurus-gtm-plugin": "^0.0.2",
+        "prop-types": "^15.8.1",
+        "raw-loader": "^4.0.2",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "unist-util-visit": "^5.0.0"
+    },
+    "devDependencies": {
+        "@apify/eslint-config-ts": "^0.4.0",
+        "@apify/tsconfig": "^0.1.0",
+        "@types/react": "^19.0.0",
+        "@typescript-eslint/eslint-plugin": "^8.0.0",
+        "@typescript-eslint/parser": "^8.0.0",
+        "eslint": "^10.0.0",
+        "eslint-plugin-react": "^7.32.2",
+        "eslint-plugin-react-hooks": "^7.0.0",
+        "path-browserify": "^1.0.1",
+        "prettier": "^3.0.0",
+        "rimraf": "^6.0.0",
+        "typescript": "^5.0.0"
+    },
+    "packageManager": "yarn@4.12.0"
+}

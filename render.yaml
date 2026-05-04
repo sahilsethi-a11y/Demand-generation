@@ -1,0 +1,99 @@
+## Render Blueprint — Demand Generation Pipeline
+## Docs: https://render.com/docs/blueprint-spec
+##
+## One-click deploy:
+##   1. Push this repo to GitHub
+##   2. Go to render.com → New → Blueprint → connect repo → Deploy
+##   3. After deploy, go to each service's Environment tab and fill in
+##      all env vars marked "CHANGE ME"
+
+services:
+  # ── Backend (FastAPI) ───────────────────────────────────────────────────────
+  - type: web
+    name: demand-gen-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free                    # 512MB RAM, sleeps after 15 min inactivity
+    healthCheckPath: /health      # update if you add a /health endpoint; remove if not
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: WORKERS
+        value: "1"
+
+      # ── LLM ──────────────────────────────────────────────────────────────
+      - key: OPENAI_API_KEY
+        value: CHANGE_ME
+      - key: OPENAI_JOB_AGENT_MODEL
+        value: gpt-4.1-mini
+      - key: OPENAI_OUTREACH_MODEL
+        value: gpt-4.1-mini
+
+      # ── Turso (persistent SQLite) ─────────────────────────────────────────
+      # Create two DBs at turso.tech, then paste their libsql:// URLs here
+      - key: TURSO_COMPANY_DB_URL
+        value: CHANGE_ME          # libsql://<db-name>.turso.io
+      - key: TURSO_JOBS_DB_URL
+        value: CHANGE_ME          # libsql://<db-name>.turso.io
+      - key: TURSO_AUTH_TOKEN
+        value: CHANGE_ME          # one token works for both DBs
+
+      # ── Job scraping (Apify) ──────────────────────────────────────────────
+      - key: APIFY_API_TOKEN
+        value: CHANGE_ME
+      - key: APIFY_LEVER_ACTOR_ID
+        value: jobo.world~lever-jobs-search
+      - key: APIFY_LINKEDIN_ACTOR_ID
+        value: bebity~linkedin-jobs-scraper
+
+      # ── Lead enrichment (Apollo) ──────────────────────────────────────────
+      - key: APOLLO_API_KEY
+        value: CHANGE_ME
+
+      # ── Email delivery (Instantly) ────────────────────────────────────────
+      - key: INSTANTLY_API_KEY
+        value: CHANGE_ME
+      - key: INSTANTLY_CAMPAIGN_ID
+        value: CHANGE_ME
+
+      # ── Community signals (Discord) ───────────────────────────────────────
+      - key: DISCORD_BOT_TOKEN
+        value: CHANGE_ME
+      - key: DISCORD_CHANNEL_IDS
+        value: "[]"
+      - key: DISCORD_LOOKBACK_HOURS
+        value: "168"
+
+      # ── Research (Tavily / LangChain) ─────────────────────────────────────
+      - key: TAVILY_API_KEY
+        value: CHANGE_ME
+      - key: LANGCHAIN_TRACING_V2
+        value: "false"
+      - key: LANGCHAIN_API_KEY
+        value: CHANGE_ME
+      - key: LANGCHAIN_PROJECT
+        value: gpt-researcher
+
+      # ── Data paths (inside container — do not change) ─────────────────────
+      - key: REPORT_STORE_PATH
+        value: data/reports.json
+      - key: COMPANY_STORE_DB_PATH
+        value: data/companies.sqlite3
+      - key: JOBS_DB_PATH
+        value: data/jobs.sqlite3
+
+  # ── Frontend (NextJS) ───────────────────────────────────────────────────────
+  - type: web
+    name: demand-gen-frontend
+    runtime: docker
+    dockerfilePath: ./frontend/nextjs/Dockerfile
+    plan: free
+    envVars:
+      # Set this to the backend service URL after first deploy:
+      # e.g. https://demand-gen-backend.onrender.com
+      - key: NEXT_PUBLIC_GPTR_API_URL
+        value: CHANGE_ME
+      - key: NEXT_PUBLIC_GA_MEASUREMENT_ID
+        value: ""

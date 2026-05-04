@@ -1,0 +1,82 @@
+# AI assistant files
+.agent
+.agents
+.ai
+.aider
+.claude
+.codeium
+.continue
+.copilot
+.cursor
+.gemini
+.llm
+.llms
+.openai
+.serena
+.windsurf
+.zed-ai
+AGENTS.local.md
+CLAUDE.local.md
+GEMINI.local.md
+
+# Cache
+__pycache__
+.pytest_cache
+.ruff_cache
+.ty_cache
+.uv-cache
+
+# Virtual envs
+.direnv
+.env
+.envrc
+.python-version
+.venv
+
+# Other Python tools
+.ropeproject
+
+# Mise
+mise.toml
+.mise.toml
+
+# Egg and build artifacts
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Coverage reports
+.coverage*
+htmlcov
+coverage-unit.xml
+coverage-integration.xml
+
+# IDE, editors
+*~
+.DS_Store
+.idea
+.nvim.lua
+.vscode
+.zed
+Session.vim
+
+# Docs
+docs/changelog.md
+
+# Website build artifacts, node dependencies
+website/build
+website/node_modules
+website/.yarn
+website/.docusaurus
+website/api-typedoc-generated.json
+website/apify-shared-docspec-dump.jsonl
+website/docspec-dump.jsonl
+website/module_shortcuts.json
+website/typedoc-types*
+
+# Default directory for memory storage
+storage/
+
+# Tmp dir
+tmp/

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:apify.com)",
+      "Bash(curl -s \"https://api.apify.com/v2/acts/fantastic-jobs~ashby-jobs-api?token=\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"https://api.apify.com/v2/acts/bebity~linkedin-jobs-scraper?token=\")",
+      "Bash(python3 -c \" import json, sys data = json.load\\(sys.stdin\\) props = data.get\\('properties', {}\\) limit_keys = [k for k in props if any\\(x in k.lower\\(\\) for x in ['limit','max','count','rows','per_page','result','num','total']\\)] if limit_keys: for k in limit_keys: print\\(f' PARAM: {k}'\\) print\\(f' {json.dumps\\(props[k], indent=2\\)}'\\) else: print\\(' No limit-like params found. All keys:', list\\(props.keys\\(\\)\\)\\) \")",
+      "Bash(curl -s https://api.apify.com/v2/acts/__TRACKED_VAR__/input-schema)",
+      "Bash(curl -s \"https://api.apify.com/v2/acts/bebity~linkedin-jobs-scraper\")",
+      "Bash(python3 -c ':*)",
+      "Bash(curl -s https://api.apify.com/v2/actor-builds/__TRACKED_VAR__)",
+      "Bash(python3 -c \" import json, sys d = json.load\\(sys.stdin\\) data = d.get\\('data', {}\\) schema_str = data.get\\('inputSchema', ''\\) act_id = data.get\\('actId', 'unknown'\\) print\\('Actor ID:', act_id\\) if schema_str: schema = json.loads\\(schema_str\\) props = schema.get\\('properties', {}\\) print\\('All properties:', list\\(props.keys\\(\\)\\)\\) limit_keys = [k for k in props if any\\(x in k.lower\\(\\) for x in ['limit','max','count','rows','per_page','result','num','total','item','page']\\)] print\\('Limit-like params:', limit_keys\\) for k in limit_keys: p = props[k] print\\(f' {k}: type={p.get\\(\\\\\"type\\\\\"\\)}, default={p.get\\(\\\\\"default\\\\\"\\)}, min={p.get\\(\\\\\"minimum\\\\\"\\)}, max={p.get\\(\\\\\"maximum\\\\\"\\)}'\\) print\\(f' description: {p.get\\(\\\\\"description\\\\\",\\\\\"\\\\\"\\)[:150]}'\\) else: print\\('No inputSchema found'\\) \" echo done)",
+      "Bash(curl -s \"https://api.apify.com/v2/actor-builds/zJQoPMnLHbtYuzCT1\")",
+      "Bash(curl -s \"https://api.apify.com/v2/actor-builds/pyPAqtbwunPemaykb\")",
+      "Bash(curl -s \"https://api.apify.com/v2/actor-builds/WrLfYM3pObB4cUmfG\")"
+    ]
+  }
+}
