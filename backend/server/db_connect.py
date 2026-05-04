@@ -21,7 +21,7 @@ def connect(db_path: Path, turso_url_env: str, wal: bool = False) -> sqlite3.Con
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if turso_url and turso_token:
+    if turso_url and turso_token and turso_url.startswith("libsql://"):
         import libsql_experimental as libsql  # type: ignore[import]
         conn = libsql.connect(str(db_path), sync_url=turso_url, auth_token=turso_token)
         conn.sync()
