@@ -89,6 +89,7 @@ services:
     name: demand-gen-frontend
     runtime: docker
     dockerfilePath: ./frontend/nextjs/Dockerfile
+    dockerContext: ./frontend/nextjs
     plan: free
     envVars:
       # Set this to the backend service URL after first deploy:
