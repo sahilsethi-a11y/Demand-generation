@@ -15,6 +15,8 @@ export type JobPosting = {
   domain_derived?: string | null;
   company_key?: string | null;
   job_key?: string | null;
+  apply_url?: string | null;
+  url?: string | null;
   description_text?: string | null;
   display_location?: string | null;
   locations_derived?: string[] | null;
