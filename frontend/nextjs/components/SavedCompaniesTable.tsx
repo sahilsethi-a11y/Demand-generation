@@ -420,7 +420,7 @@ const SavedCompaniesTable = () => {
       return;
     }
     void (async () => {
-      for (const [index, company] of selectedCompanies.entries()) {
+      for (const [index, company] of Array.from(selectedCompanies.entries())) {
         setApolloStatusMessage(`Processing company ${index + 1}/${selectedCompanies.length}: ${company.name}`);
         await handleApolloSearch(company);
       }

@@ -228,7 +228,7 @@ export default function CopilotResearchContent({
           ).trim() || undefined,
         };
       })
-      .filter((company): company is ParsedCompany => Boolean(company));
+      .filter((company) => company !== null) as ParsedCompany[];
   }, []);
 
   const [activeSection, setActiveSection] = useState<ActiveSection>("home");
@@ -653,7 +653,7 @@ export default function CopilotResearchContent({
           `Found ${parsedCompanies.length.toLocaleString()} companies. Starting save and Apollo enrichment one by one.`
         );
         const savedCompanies: Record<string, unknown>[] = [];
-        for (const [index, company] of parsedCompanies.entries()) {
+        for (const [index, company] of Array.from(parsedCompanies.entries())) {
           appendAutomationLog(
             `Saving company ${index + 1}/${parsedCompanies.length}: ${company.name}.`
           );
@@ -686,7 +686,7 @@ export default function CopilotResearchContent({
         const saveableCompanies = savedCompanies.filter(
           (company): company is Record<string, unknown> => Boolean(company?.id)
         );
-        for (const [index, company] of saveableCompanies.entries()) {
+        for (const [index, company] of Array.from(saveableCompanies.entries())) {
           appendAutomationLog(
             `Fetching Apollo employees for ${String(company.name || `company ${index + 1}`)} (${index + 1}/${saveableCompanies.length}).`
           );
@@ -721,7 +721,7 @@ export default function CopilotResearchContent({
           return;
         }
         const companiesWithGeneratedContent: Record<string, unknown>[] = [];
-        for (const [index, company] of companiesWithEmployees.entries()) {
+        for (const [index, company] of Array.from(companiesWithEmployees.entries())) {
           appendAutomationLog(
             `Generating partnership content for ICPs at ${String(company.name || `company ${index + 1}`)} (${index + 1}/${companiesWithEmployees.length}).`
           );
@@ -969,7 +969,7 @@ export default function CopilotResearchContent({
           savedJobsContactTitleFilter,
           false
         );
-        selectedJobs = refreshedJobs.filter((job) =>
+        selectedJobs = refreshedJobs.filter((job: any) =>
           selectedJobKeySet.has(job.job_key || job.apply_url || job.url || `${job.source}-${job.id}`)
         );
       }
@@ -1512,18 +1512,18 @@ export default function CopilotResearchContent({
                       </button>
                     </div>
                     <InvestorFilters
-                      investorType={investorType}
-                      hqCountry={hqCountry}
-                      industry={industry}
-                      companyCount={companyCount}
-                      companySearchProvider={companySearchProvider}
+                      investorType={investorType ?? ""}
+                      hqCountry={hqCountry ?? ""}
+                      industry={industry ?? ""}
+                      companyCount={companyCount ?? 10}
+                      companySearchProvider={companySearchProvider ?? "apollo"}
                       runApolloEnrichmentAndContent={runCompanyApolloEnrichmentAndContent}
                       pushToInstantly={pushCompaniesToInstantlyAfterSearch}
-                      onInvestorTypeChange={setInvestorType}
-                      onHqCountryChange={setHqCountry}
-                      onIndustryChange={setIndustry}
-                      onCompanyCountChange={setCompanyCount}
-                      onCompanySearchProviderChange={setCompanySearchProvider}
+                      onInvestorTypeChange={setInvestorType ?? (() => {})}
+                      onHqCountryChange={setHqCountry ?? (() => {})}
+                      onIndustryChange={setIndustry ?? (() => {})}
+                      onCompanyCountChange={setCompanyCount ?? (() => {})}
+                      onCompanySearchProviderChange={setCompanySearchProvider ?? (() => {})}
                       onRunApolloEnrichmentAndContentChange={setRunCompanyApolloEnrichmentAndContent}
                       onPushToInstantlyChange={setPushCompaniesToInstantlyAfterSearch}
                       className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-4"

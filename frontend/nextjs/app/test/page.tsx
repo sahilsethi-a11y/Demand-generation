@@ -1067,7 +1067,7 @@ export default function TestConsolePage() {
               endpoint="/api/jobs"
               inputPlaceholder={"// Configured via the controls below — no manual JSON needed"}
               state={steps[0]}
-              onRun={runStep1}
+              onRun={(_input) => runStep1() ?? Promise.resolve()}
               onInputChange={updateInput(0)}
               carryOptions={[{ label: "Step 2 (Extract)", targetStep: 1, transform: jobsToExtractInput }]}
               onCarry={carryTo}

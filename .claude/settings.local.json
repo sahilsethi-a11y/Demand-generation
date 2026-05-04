@@ -3,7 +3,8 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:apify.com)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(npx tsc *)"
     ]
   }
 }

@@ -642,6 +642,10 @@ def _run_apollo_company_enrichment(
 
 
 # Routes
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
     """Serve the main frontend HTML page."""

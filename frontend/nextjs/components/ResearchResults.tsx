@@ -517,7 +517,7 @@ export const ResearchResults: React.FC<ResearchResultsProps> = ({
       const bulkMatchLookup = new Map(
         bulkMatchLeads.map((lead: ApolloLead) => [normalizeCompanyKey(lead.name), lead])
       );
-      const leadsWithBulkMatch = leads.map((lead) => {
+      const leadsWithBulkMatch = leads.map((lead: any) => {
         const matched = bulkMatchLookup.get(normalizeCompanyKey(lead.name));
         return {
           ...lead,
