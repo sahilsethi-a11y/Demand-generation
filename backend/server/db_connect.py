@@ -25,7 +25,7 @@ def connect(db_path: Path, turso_url_env: str, wal: bool = False) -> sqlite3.Con
         import libsql_experimental as libsql  # type: ignore[import]
         conn = libsql.connect(str(db_path), sync_url=turso_url, auth_token=turso_token)
         conn.sync()
-        conn.row_factory = libsql.Row
+        conn.row_factory = sqlite3.Row
         return conn
 
     conn = sqlite3.connect(str(db_path))
