@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 
 class _Row:
@@ -98,12 +99,22 @@ class _Connection:
         return False
 
 
-def connect(db_path: Path, turso_url_env: str, wal: bool = False) -> sqlite3.Connection:
+# ── Singleton pool — one connection per Turso env-var key ────────────────────
+# Opening a libsql embedded-replica connection + sync() takes ~300 ms over the
+# network. Reusing one connection per DB makes reads instant (local file).
+_pool: dict[str, _Connection] = {}
+_local_pool: dict[str, sqlite3.Connection] = {}
+
+
+def connect(db_path: Path, turso_url_env: str, wal: bool = False):
     """
     Returns a sqlite3-compatible connection.
     Uses Turso (libsql-experimental embedded replica) when TURSO_AUTH_TOKEN
     and the given turso_url_env variable are both set with a valid libsql:// URL;
     otherwise falls back to local SQLite.
+
+    Connections are singletons — one per DB — so the network sync only happens
+    once at startup rather than on every query.
     """
     turso_url = os.getenv(turso_url_env)
     turso_token = os.getenv("TURSO_AUTH_TOKEN")
@@ -111,13 +122,25 @@ def connect(db_path: Path, turso_url_env: str, wal: bool = False) -> sqlite3.Con
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     if turso_url and turso_token and turso_url.startswith("libsql://"):
-        import libsql_experimental as libsql  # type: ignore[import]
-        raw = libsql.connect(str(db_path), sync_url=turso_url, auth_token=turso_token)
-        raw.sync()
-        return _Connection(raw)  # type: ignore[return-value]
+        if turso_url_env not in _pool:
+            import libsql_experimental as libsql  # type: ignore[import]
+            raw = libsql.connect(str(db_path), sync_url=turso_url, auth_token=turso_token)
+            raw.sync()  # one-time sync at first connect
+            _pool[turso_url_env] = _Connection(raw)
+        return _pool[turso_url_env]
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    if wal:
-        conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    # Local SQLite — also singleton to avoid repeated open/close overhead
+    key = str(db_path.resolve())
+    if key not in _local_pool:
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        if wal:
+            conn.execute("PRAGMA journal_mode=WAL")
+        _local_pool[key] = conn
+    return _local_pool[key]
+
+
+def sync_all() -> None:
+    """Pull latest remote changes into all open Turso replicas. Call periodically."""
+    for conn in _pool.values():
+        conn.sync()

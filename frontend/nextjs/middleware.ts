@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/api/auth"];
 const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "change-me-please-set-jwt-secret-env-var"
 );

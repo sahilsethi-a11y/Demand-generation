@@ -14,7 +14,8 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free                    # 512MB RAM, sleeps after 15 min inactivity
-    healthCheckPath: /health      # update if you add a /health endpoint; remove if not
+    region: singapore             # closest Render region to India
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: "8000"
@@ -91,6 +92,7 @@ services:
     dockerfilePath: ./frontend/nextjs/Dockerfile
     dockerContext: ./frontend/nextjs
     plan: free
+    region: singapore             # closest Render region to India
     envVars:
       # Set this to the backend service URL after first deploy:
       # e.g. https://demand-gen-backend.onrender.com

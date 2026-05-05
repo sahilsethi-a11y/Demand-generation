@@ -166,15 +166,14 @@ class CompanyStore:
             connection.commit()
 
     def _migrate_columns(self, connection: sqlite3.Connection) -> None:
-        existing_columns = {row["name"] for row in connection.execute("PRAGMA table_info(companies)").fetchall()}
-        if "total_employees_count" not in existing_columns:
-            connection.execute(
-                "ALTER TABLE companies ADD COLUMN total_employees_count INTEGER NOT NULL DEFAULT 0"
-            )
-        if "icp_employees_count" not in existing_columns:
-            connection.execute(
-                "ALTER TABLE companies ADD COLUMN icp_employees_count INTEGER NOT NULL DEFAULT 0"
-            )
+        for ddl in (
+            "ALTER TABLE companies ADD COLUMN total_employees_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE companies ADD COLUMN icp_employees_count INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                connection.execute(ddl)
+            except Exception:
+                pass  # column already exists
         connection.execute(
             """
             UPDATE companies

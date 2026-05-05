@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/utils/apiFetch";
+
 import { useState, useEffect, useCallback } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
@@ -96,7 +98,7 @@ export default function AnalyticsPage() {
     setError(null);
 
     const [instantlyRes, localRes] = await Promise.all([
-      fetch(`${API_BASE}/api/instantly-analytics`).catch(() => null),
+      apiFetch(`/api/instantly-analytics`).catch(() => null),
       fetch(`/api/analytics/summary`).catch(() => null),
     ]);
 

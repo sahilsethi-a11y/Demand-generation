@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/utils/apiFetch";
+
 import { useState, useEffect, useMemo } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
@@ -166,8 +168,8 @@ export default function CompaniesPage() {
     setError(null);
     try {
       const [compRes, outreachRes] = await Promise.all([
-        fetch(`${API_BASE}/api/companies?page=${page}&page_size=${PAGE_SIZE}`),
-        fetch(`${API_BASE}/api/outreach-log?limit=5000`),
+        apiFetch(`/api/companies?page=${page}&page_size=${PAGE_SIZE}`),
+        apiFetch(`/api/outreach-log?limit=5000`),
       ]);
 
       if (!compRes.ok) throw new Error("Failed to load companies");

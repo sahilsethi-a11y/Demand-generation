@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/utils/apiFetch";
+
 import { useState, useEffect, useCallback } from "react";
 import JobDetailModal from "@/components/JobDetailModal";
 
@@ -61,7 +63,7 @@ export default function JobsPage() {
       source,
       role_query: search,
     });
-    const res = await fetch(`${API_BASE}/api/jobs/saved?${params}`).catch(() => null);
+    const res = await apiFetch(`/api/jobs/saved?${params}`).catch(() => null);
     if (res?.ok) {
       const data = await res.json();
       setJobs(data.jobs || []);

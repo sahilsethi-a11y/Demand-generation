@@ -1017,17 +1017,17 @@ class JobStore:
         except Exception:
             pass
 
-        # Index for fast per-run email lookups
-        connection.execute(
-            "CREATE INDEX IF NOT EXISTS idx_oe_pipeline_run_id ON outreach_emails(pipeline_run_id)"
-        )
+        # Index for fast per-run email lookups (table may not exist yet on first boot)
+        try:
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_oe_pipeline_run_id ON outreach_emails(pipeline_run_id)"
+            )
+        except Exception:
+            pass
 
     @staticmethod
     def _migrate_saved_jobs_table(connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(saved_jobs)").fetchall()
-        }
-        required_columns = {
+        for col, defn in {
             "company_key": "TEXT DEFAULT ''",
             "company_domain": "TEXT DEFAULT ''",
             "source": "TEXT",
@@ -1038,20 +1038,15 @@ class JobStore:
             "payload_json": "TEXT NOT NULL DEFAULT '{}'",
             "created_at": "INTEGER NOT NULL DEFAULT 0",
             "updated_at": "INTEGER NOT NULL DEFAULT 0",
-        }
-        for column_name, column_definition in required_columns.items():
-            if column_name in columns:
-                continue
-            connection.execute(
-                f"ALTER TABLE saved_jobs ADD COLUMN {column_name} {column_definition}"
-            )
+        }.items():
+            try:
+                connection.execute(f"ALTER TABLE saved_jobs ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
 
     @staticmethod
     def _migrate_company_contacts_table(connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(company_contacts)").fetchall()
-        }
-        required_columns = {
+        for col, defn in {
             "company_key": "TEXT NOT NULL DEFAULT ''",
             "name": "TEXT",
             "title": "TEXT",
@@ -1064,20 +1059,15 @@ class JobStore:
             "payload_json": "TEXT",
             "created_at": "INTEGER NOT NULL DEFAULT 0",
             "updated_at": "INTEGER NOT NULL DEFAULT 0",
-        }
-        for column_name, column_definition in required_columns.items():
-            if column_name in columns:
-                continue
-            connection.execute(
-                f"ALTER TABLE company_contacts ADD COLUMN {column_name} {column_definition}"
-            )
+        }.items():
+            try:
+                connection.execute(f"ALTER TABLE company_contacts ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
 
     @staticmethod
     def _migrate_company_enrichment_table(connection: sqlite3.Connection) -> None:
-        columns = {
-            row["name"] for row in connection.execute("PRAGMA table_info(company_enrichment)").fetchall()
-        }
-        required_columns = {
+        for col, defn in {
             "company_name": "TEXT",
             "company_domain": "TEXT",
             "status": "TEXT NOT NULL DEFAULT 'pending'",
@@ -1088,13 +1078,11 @@ class JobStore:
             "last_attempted_at": "INTEGER",
             "last_completed_at": "INTEGER",
             "updated_at": "INTEGER NOT NULL DEFAULT 0",
-        }
-        for column_name, column_definition in required_columns.items():
-            if column_name in columns:
-                continue
-            connection.execute(
-                f"ALTER TABLE company_enrichment ADD COLUMN {column_name} {column_definition}"
-            )
+        }.items():
+            try:
+                connection.execute(f"ALTER TABLE company_enrichment ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
 
     @classmethod
     def _backfill_saved_jobs_company_metadata(cls, connection: sqlite3.Connection) -> None:

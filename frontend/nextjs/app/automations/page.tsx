@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/utils/apiFetch";
+
 import { useState, useEffect, useCallback } from "react";
 import AutomationForm, { AutomationFormData, DEFAULT_FORM_DATA } from "@/components/AutomationForm";
 
@@ -128,7 +130,7 @@ function ScheduleCard({
   async function loadHistory() {
     if (historyLoading) return;
     setHistoryLoading(true);
-    const res = await fetch(`${API_BASE}/api/automations/${schedule.schedule_id}/history?limit=10`).catch(() => null);
+    const res = await apiFetch(`/api/automations/${schedule.schedule_id}/history?limit=10`).catch(() => null);
     if (res?.ok) {
       const data = await res.json();
       setHistory(data.history || []);
@@ -369,7 +371,7 @@ export default function AutomationsPage() {
   }, []);
 
   const fetchSchedules = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/api/automations`).catch(() => null);
+    const res = await apiFetch(`/api/automations`).catch(() => null);
     if (res?.ok) {
       const data = await res.json();
       setSchedules(data.schedules || []);
@@ -388,7 +390,7 @@ export default function AutomationsPage() {
 
   async function handleCreate(data: AutomationFormData) {
     setCreating(true);
-    const res = await fetch(`${API_BASE}/api/automations`, {
+    const res = await apiFetch(`/api/automations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -404,7 +406,7 @@ export default function AutomationsPage() {
 
   async function handleEdit(data: AutomationFormData) {
     if (!editTarget) return;
-    const res = await fetch(`${API_BASE}/api/automations/${editTarget.schedule_id}`, {
+    const res = await apiFetch(`/api/automations/${editTarget.schedule_id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -419,26 +421,26 @@ export default function AutomationsPage() {
   }
 
   async function handlePause(id: string) {
-    const res = await fetch(`${API_BASE}/api/automations/${id}/pause`, { method: "POST" }).catch(() => null);
+    const res = await apiFetch(`/api/automations/${id}/pause`, { method: "POST" }).catch(() => null);
     if (res?.ok) { showToast("Paused"); fetchSchedules(); }
     else showToast("Failed to pause", "error");
   }
 
   async function handleResume(id: string) {
-    const res = await fetch(`${API_BASE}/api/automations/${id}/resume`, { method: "POST" }).catch(() => null);
+    const res = await apiFetch(`/api/automations/${id}/resume`, { method: "POST" }).catch(() => null);
     if (res?.ok) { showToast("Resumed"); fetchSchedules(); }
     else showToast("Failed to resume", "error");
   }
 
   async function handleTrigger(id: string) {
-    const res = await fetch(`${API_BASE}/api/automations/${id}/trigger`, { method: "POST" }).catch(() => null);
+    const res = await apiFetch(`/api/automations/${id}/trigger`, { method: "POST" }).catch(() => null);
     if (res?.ok) { showToast("Triggered — will fire within 30s"); }
     else showToast("Failed to trigger", "error");
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Delete this automation and all its run history?")) return;
-    const res = await fetch(`${API_BASE}/api/automations/${id}`, { method: "DELETE" }).catch(() => null);
+    const res = await apiFetch(`/api/automations/${id}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok) { showToast("Deleted"); fetchSchedules(); }
     else showToast("Failed to delete", "error");
   }

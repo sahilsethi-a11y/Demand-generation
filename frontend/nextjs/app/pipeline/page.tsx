@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-
-const API_BASE = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
+import { apiFetch } from "@/utils/apiFetch";
 
 // ── Cost reference data ─────────────────────────────────────────────────────
 const ACTOR_COSTS = {
@@ -83,6 +82,7 @@ export default function PipelinePage() {
   const [selectedSources, setSelectedSources] = useState<string[]>(["greenhouse", "ashby", "lever"]);
   const [maxCompanies, setMaxCompanies] = useState(100);
   const [autoSend, setAutoSend] = useState(false);
+  const [testMode, setTestMode] = useState(false);
 
   const [running, setRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
@@ -98,6 +98,48 @@ export default function PipelinePage() {
 
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Resume active run after tab switch
+  useEffect(() => {
+    const savedId = sessionStorage.getItem("pipeline_run_id");
+    if (!savedId) return;
+    setRunId(savedId);
+    setRunning(true);
+    setPipelineStatus("running");
+
+    async function resumePoll() {
+      const statusRes = await apiFetch(`/api/pipeline/status/${savedId}`).catch(() => null);
+      if (!statusRes?.ok) return;
+      const status = await statusRes.json();
+      const stageMap: Record<string, StageState> = {};
+      for (const event of status.events || []) {
+        const s: StageStatus = event.status === "done" ? "done" : event.status === "error" ? "error" : event.status === "skipped" ? "skipped" : event.status === "in_progress" ? "in_progress" : "waiting";
+        if (!stageMap[event.stage]) {
+          stageMap[event.stage] = { status: s, message: event.message, counts: event.counts, events: [] };
+        } else {
+          stageMap[event.stage].status = s;
+          stageMap[event.stage].message = event.message;
+          if (event.counts) stageMap[event.stage].counts = event.counts;
+        }
+        stageMap[event.stage].events.push({ status: s, message: event.message, counts: event.counts, timestamp: event.timestamp });
+      }
+      setStages(stageMap);
+      if (status.company_details) setCompanyDetails(status.company_details);
+      if (status.status === "completed" || status.status === "failed") {
+        setPipelineStatus(status.status);
+        setSummary(status.summary || null);
+        setOutreachResults(status.outreach_results || []);
+        setCompanyDetails(status.company_details || []);
+        setRunning(false);
+        sessionStorage.removeItem("pipeline_run_id");
+        if (pollRef.current) clearInterval(pollRef.current);
+      }
+    }
+
+    resumePoll();
+    pollRef.current = setInterval(resumePoll, 2000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   // Update sources when market changes
   useEffect(() => {
@@ -166,9 +208,8 @@ export default function PipelinePage() {
     setPipelineStatus("starting");
     setActiveTab("progress");
 
-    const res = await fetch(`${API_BASE}/api/pipeline/run`, {
+    const res = await apiFetch("/api/pipeline/run", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         role: role.trim(),
         location: location.trim(),
@@ -179,6 +220,7 @@ export default function PipelinePage() {
         auto_icp: true,
         auto_email: true,
         auto_send: autoSend,
+        test_mode: testMode,
         max_companies: maxCompanies,
         max_icps_per_company: 3,
         campaign_id: null,
@@ -196,10 +238,10 @@ export default function PipelinePage() {
     const id = data.run_id as string;
     setRunId(id);
     setPipelineStatus("running");
+    sessionStorage.setItem("pipeline_run_id", id);
 
-    // Poll for status
-    pollRef.current = setInterval(async () => {
-      const statusRes = await fetch(`${API_BASE}/api/pipeline/status/${id}`).catch(() => null);
+    async function pollOnce() {
+      const statusRes = await apiFetch(`/api/pipeline/status/${id}`).catch(() => null);
       if (!statusRes?.ok) return;
       const status = await statusRes.json();
 
@@ -238,15 +280,21 @@ export default function PipelinePage() {
         setOutreachResults(status.outreach_results || []);
         setCompanyDetails(status.company_details || []);
         setRunning(false);
+        sessionStorage.removeItem("pipeline_run_id");
         if (pollRef.current) clearInterval(pollRef.current);
       }
-    }, 2000);
+    }
+
+    // Poll immediately, then every 2s
+    pollOnce();
+    pollRef.current = setInterval(pollOnce, 2000);
   }
 
   function abortPipeline() {
     if (pollRef.current) clearInterval(pollRef.current);
     setRunning(false);
     setPipelineStatus("aborted");
+    sessionStorage.removeItem("pipeline_run_id");
   }
 
   const cost = estimateCost();
@@ -468,15 +516,33 @@ export default function PipelinePage() {
                       </p>
                     </div>
                   )}
-                  <label className="flex items-center gap-2.5 cursor-pointer mt-4">
-                    <input
-                      type="checkbox"
-                      checked={autoSend}
-                      onChange={(e) => setAutoSend(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
-                    />
-                    <span className="text-sm text-slate-600">Auto-send to Instantly</span>
-                  </label>
+                  <div className="flex flex-col gap-2.5 mt-4">
+                    <label className="flex items-center gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoSend}
+                        onChange={(e) => setAutoSend(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
+                      />
+                      <span className="text-sm text-slate-600">Auto-send to Instantly</span>
+                    </label>
+                    <label className="flex items-center gap-2.5 cursor-pointer group">
+                      <input
+                        type="checkbox"
+                        checked={testMode}
+                        onChange={(e) => setTestMode(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-400"
+                      />
+                      <span className="text-sm text-slate-600 group-hover:text-amber-700 transition-colors">
+                        Test mode
+                      </span>
+                      {testMode && (
+                        <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-600 leading-none">
+                          1 company · 3 ICPs
+                        </span>
+                      )}
+                    </label>
+                  </div>
                 </div>
                 <button
                   onClick={startPipeline}
@@ -499,8 +565,13 @@ export default function PipelinePage() {
             {/* Header bar */}
             <div className="bg-white border border-brand-border rounded-xl px-6 py-4 flex items-center justify-between shadow-sm">
               <div>
-                <h2 className="text-sm font-semibold text-brand-secondary">
+                <h2 className="text-sm font-semibold text-brand-secondary flex items-center gap-2">
                   Pipeline Run · {role} · {location} · {market.toUpperCase()}
+                  {testMode && (
+                    <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-600 leading-none">
+                      TEST
+                    </span>
+                  )}
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {pipelineStatus === "running" ? "Running..." : pipelineStatus === "completed" ? "Completed" : pipelineStatus === "failed" ? "Failed" : "Aborted"}
@@ -517,7 +588,7 @@ export default function PipelinePage() {
                 )}
                 {!running && (
                   <button
-                    onClick={() => { setPipelineStatus("idle"); setStages({}); setSummary(null); setLogs([]); setOutreachResults([]); setCompanyDetails([]); setExpandedCompany(null); setCompanySubTab({}); }}
+                    onClick={() => { setPipelineStatus("idle"); setStages({}); setSummary(null); setLogs([]); setOutreachResults([]); setCompanyDetails([]); setExpandedCompany(null); setCompanySubTab({}); sessionStorage.removeItem("pipeline_run_id"); }}
                     className="px-4 py-2 text-sm font-medium text-brand-primary border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
                   >
                     New Run
@@ -618,7 +689,11 @@ export default function PipelinePage() {
 
                     {/* Waiting placeholder */}
                     {status === "waiting" && (
-                      <p className="mt-1 ml-8 text-xs text-slate-300 italic">Waiting for previous step...</p>
+                      <p className="mt-1 ml-8 text-xs text-slate-300 italic">
+                        {idx === 0 && running && Object.keys(stages).length === 0
+                          ? "Starting pipeline…"
+                          : "Waiting for previous step…"}
+                      </p>
                     )}
                   </div>
                 );

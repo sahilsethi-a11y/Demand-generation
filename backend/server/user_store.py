@@ -65,3 +65,15 @@ class UserStore:
         with self._connect() as conn:
             row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
         return row[0] if row else 0
+
+    def list_users(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT user_id, email, role, created_at FROM users ORDER BY created_at ASC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_user(self, user_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        return cur.rowcount > 0

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { apiFetch } from "@/utils/apiFetch";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
 
@@ -108,7 +110,159 @@ function SettingsSection({ title, fields, values, onChange }: {
   );
 }
 
+interface UserRecord {
+  user_id: string;
+  email: string;
+  role: string;
+  created_at: number;
+}
+
+function UsersSection() {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState("user");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  async function loadUsers() {
+    try {
+      const r = await apiFetch("/api/auth/users");
+      const d = await r.json();
+      setUsers(d.users ?? []);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadUsers(); }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setError(""); setSuccess("");
+    setCreating(true);
+    try {
+      const r = await apiFetch("/api/auth/users", {
+        method: "POST",
+        body: JSON.stringify({ email: newEmail, password: newPassword, role: newRole }),
+      });
+      if (!r.ok) {
+        const d = await r.json();
+        setError(d.detail ?? "Failed to create user");
+      } else {
+        setSuccess(`User ${newEmail} created`);
+        setNewEmail(""); setNewPassword(""); setNewRole("user");
+        loadUsers();
+      }
+    } catch { setError("Network error"); }
+    finally { setCreating(false); }
+  }
+
+  async function handleDelete(userId: string, email: string) {
+    if (!confirm(`Delete ${email}?`)) return;
+    try {
+      await apiFetch(`/api/auth/users/${userId}`, { method: "DELETE" });
+      setUsers((prev) => prev.filter((u) => u.user_id !== userId));
+    } catch { /* ignore */ }
+  }
+
+  return (
+    <div className="bg-white border border-brand-border rounded-xl overflow-hidden shadow-sm mb-6">
+      <div className="px-6 py-4 border-b border-brand-border bg-slate-50">
+        <h2 className="text-sm font-semibold text-brand-secondary">User Management</h2>
+        <p className="text-xs text-slate-400 mt-0.5">Admin only — create and remove user accounts</p>
+      </div>
+
+      {/* Existing users */}
+      <div className="px-6 py-4">
+        {loading ? (
+          <p className="text-sm text-slate-400">Loading…</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-brand-border">
+                <th className="pb-2 font-medium">Email</th>
+                <th className="pb-2 font-medium">Role</th>
+                <th className="pb-2 font-medium">Created</th>
+                <th className="pb-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.user_id} className="border-b border-brand-border last:border-0">
+                  <td className="py-2.5 text-brand-secondary">{u.email}</td>
+                  <td className="py-2.5">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                      u.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600"
+                    }`}>{u.role}</span>
+                  </td>
+                  <td className="py-2.5 text-slate-400 text-xs">
+                    {new Date(u.created_at).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <button
+                      onClick={() => handleDelete(u.user_id, u.email)}
+                      className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Add user form */}
+      <div className="px-6 py-4 border-t border-brand-border bg-slate-50">
+        <p className="text-xs font-semibold text-slate-500 mb-3">Add New User</p>
+        <form onSubmit={handleCreate} className="flex items-end gap-3 flex-wrap">
+          <div className="flex-1 min-w-48">
+            <label className="text-xs text-slate-400 block mb-1">Email</label>
+            <input
+              type="email" required value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="name@company.com"
+              className="w-full px-3 py-2 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary"
+            />
+          </div>
+          <div className="flex-1 min-w-36">
+            <label className="text-xs text-slate-400 block mb-1">Password</label>
+            <input
+              type="password" required value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full px-3 py-2 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Role</label>
+            <select
+              value={newRole} onChange={(e) => setNewRole(e.target.value)}
+              className="px-3 py-2 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary"
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button
+            type="submit" disabled={creating}
+            className="px-4 py-2 bg-brand-primary text-white text-sm font-semibold rounded-lg hover:bg-blue-800 disabled:opacity-50 transition-colors"
+          >
+            {creating ? "Creating…" : "Create"}
+          </button>
+        </form>
+        {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
+        {success && <p className="text-green-600 text-xs mt-2">{success}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
+  const { user } = useAuth();
   const [values, setValues] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
 
@@ -152,6 +306,7 @@ export default function SettingsPage() {
           </button>
         </div>
 
+        {user?.role === "admin" && <UsersSection />}
         <SettingsSection title="API Keys" fields={API_KEY_FIELDS} values={values} onChange={handleChange} />
         <SettingsSection title="Campaign Configuration" fields={CAMPAIGN_FIELDS} values={values} onChange={handleChange} />
         <SettingsSection title="Sender Identity" fields={SENDER_FIELDS} values={values} onChange={handleChange} />

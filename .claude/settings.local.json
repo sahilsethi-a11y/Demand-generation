@@ -21,7 +21,21 @@
       "Bash(npm list *)",
       "Bash(openssl rand *)",
       "Bash(echo \"JWT_SECRET=$\\(openssl rand -hex 32\\)\")",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python3.11 -m pip install \"python-jose[cryptography]\" \"passlib[bcrypt]\")",
+      "Bash(.venv/bin/python3.11 -c \"from jose import jwt; from passlib.context import CryptContext; print\\('imports ok'\\)\")",
+      "Bash(.venv/bin/python3.11 -m pip install \"libsql-experimental>=0.0.11\")",
+      "Bash(.venv/bin/python3.11 -m pip install \"bcrypt>=3.2.0,<4.0.0\")",
+      "Bash(grep -rn \"fetch\\(\\\\`\\\\${API_BASE}\" /Users/sahil/Desktop/POCs/EMB-TalentOS/Demand-Generation/frontend/nextjs/app --include=\"*.tsx\")",
+      "Bash(grep -n \"fetch\\(\\\\`\\\\${API_BASE}\" /Users/sahil/Desktop/POCs/EMB-TalentOS/Demand-Generation/frontend/nextjs/app/jobs/page.tsx)",
+      "Bash(grep -n \"fetch\\(\\\\`\\\\${API_BASE}\" /Users/sahil/Desktop/POCs/EMB-TalentOS/Demand-Generation/frontend/nextjs/app/companies/page.tsx)",
+      "Bash(grep -rn \"fetch\\(\\\\`\\\\${API_BASE\\\\|fetch\\(\\\\`\\\\${process.env\" /Users/sahil/Desktop/POCs/EMB-TalentOS/Demand-Generation/frontend/nextjs/app --include=\"*.tsx\")",
+      "Bash(turso locations *)",
+      "Bash(curl -s \"https://api.turso.tech/v1/locations\" -H \"Authorization: Bearer $\\(turso auth token\\)\")",
+      "Bash(python3 -c \"import sys,json; locs=json.load\\(sys.stdin\\); [print\\(k,v\\) for k,v in sorted\\(locs.get\\('locations',{}\\).items\\(\\)\\)]\")",
+      "Bash(wait)",
+      "Bash(.venv/bin/python3.11 create_admin.py sahil.sethi@emb.global Sahil@12345)"
     ]
   }
 }

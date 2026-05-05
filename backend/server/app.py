@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 warnings.filterwarnings("ignore", message="Valid config keys have changed in V2")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, BackgroundTasks, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, File, UploadFile, BackgroundTasks, HTTPException, Depends
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +27,9 @@ from pydantic import BaseModel, ConfigDict
 # Add the parent directory to sys.path to make sure we can import from server
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+_root = Path(__file__).resolve().parents[2]
+load_dotenv(dotenv_path=_root / ".env")
+load_dotenv(dotenv_path=_root / ".env.local", override=True)  # local overrides (e.g. disable Turso)
 
 from server.websocket_manager import WebSocketManager
 from server.company_store import CompanyStore
@@ -172,6 +174,17 @@ class PortfolioSearchRequest(BaseModel):
     companies: List[PortfolioSearchCompany]
 
 
+async def _turso_sync_poller() -> None:
+    """Background asyncio task: pull remote Turso changes into local replicas every 60 s."""
+    from .db_connect import sync_all
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await asyncio.get_event_loop().run_in_executor(None, sync_all)
+        except Exception as exc:
+            logger.debug("Turso background sync error: %s", exc)
+
+
 async def _schedule_poller() -> None:
     """Background asyncio task: fires due automation schedules every 30 seconds."""
     import threading
@@ -231,12 +244,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning(f"Frontend directory not found: {frontend_path}")
 
-    # Start automation schedule poller
+    # Start automation schedule poller + periodic Turso sync
     poller_task = asyncio.create_task(_schedule_poller())
+    sync_task = asyncio.create_task(_turso_sync_poller())
     logger.info("GPT Researcher API ready - local mode with job persistence")
     yield
     # Shutdown
     poller_task.cancel()
+    sync_task.cancel()
     logger.info("Research API shutting down")
 
 # App initialization
@@ -1637,8 +1652,9 @@ def _run_pipeline(
     market = request_data.get("market", "us")
     job_type = request_data.get("job_type", "all")
     sources = request_data.get("sources")
-    max_companies = int(request_data.get("max_companies") or 20)
-    max_icps = int(request_data.get("max_icps_per_company") or 5)
+    test_mode = bool(request_data.get("test_mode", False))
+    max_companies = 1 if test_mode else int(request_data.get("max_companies") or 20)
+    max_icps = 3 if test_mode else int(request_data.get("max_icps_per_company") or 5)
     auto_email = bool(request_data.get("auto_email", True))
     auto_send = bool(request_data.get("auto_send", False))
     campaign_id = request_data.get("campaign_id") or os.getenv("INSTANTLY_CAMPAIGN_ID", "")
@@ -1698,7 +1714,9 @@ def _run_pipeline(
 
         # For India: 100 jobs total split across selected actors.
         # For US: keep the existing formula.
-        if is_india:
+        if test_mode:
+            _initial_per_actor = 10
+        elif is_india:
             _initial_per_actor = _math.ceil(_INDIA_INITIAL_JOBS / _n_india_actors)
         else:
             _initial_per_actor = max(200, max_companies * 4)

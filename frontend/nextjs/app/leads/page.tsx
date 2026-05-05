@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/utils/apiFetch";
+
 import { useState, useEffect, useCallback } from "react";
 
 const API_BASE = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
@@ -66,7 +68,7 @@ export default function LeadsPage() {
 
   const fetchLeads = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`${API_BASE}/api/companies?include_employees=true&page=1&page_size=200`).catch(() => null);
+    const res = await apiFetch(`/api/companies?include_employees=true&page=1&page_size=200`).catch(() => null);
     if (res?.ok) {
       const data = await res.json();
       setCompanies(data.companies || []);
@@ -99,9 +101,8 @@ export default function LeadsPage() {
     const key = `${lead.email}-${lead._company_name}`;
     setSending((prev) => ({ ...prev, [key]: true }));
     try {
-      const res = await fetch(`${NEXT_API_BASE}/api/jobs/instantly`, {
+      const res = await apiFetch(`/api/jobs/instantly`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobs: [{
             organization: lead._company_name,

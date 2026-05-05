@@ -25,24 +25,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const apiBase = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
 
   useEffect(() => {
-    fetch(`${apiBase}/api/auth/me`, { credentials: "include" })
+    fetch("/api/auth/me")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => setUser(data))
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
-  }, [apiBase]);
+  }, []);
 
   const logout = useCallback(async () => {
-    await fetch(`${apiBase}/api/auth/logout`, {
-      method: "POST",
-      credentials: "include",
-    });
+    await fetch("/api/auth/logout", { method: "POST" });
     setUser(null);
     router.push("/login");
-  }, [apiBase, router]);
+  }, [router]);
 
   return (
     <AuthContext.Provider value={{ user, loading, logout }}>

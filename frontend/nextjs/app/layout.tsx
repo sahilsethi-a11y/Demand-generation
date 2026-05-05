@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { ResearchHistoryProvider } from "@/hooks/ResearchHistoryContext";
 import { AuthProvider } from "@/contexts/AuthContext";
-import AppNav from "@/components/AppNav";
+import ClientLayout from "@/components/ClientLayout";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -27,10 +27,7 @@ export default function RootLayout({
       <body className={`${inter.className} bg-brand-surface text-brand-secondary min-h-screen`} suppressHydrationWarning>
         <AuthProvider>
           <ResearchHistoryProvider>
-            <div className="flex min-h-screen">
-              <AppNav />
-              <main className="flex-1 ml-56 overflow-auto">{children}</main>
-            </div>
+            <ClientLayout>{children}</ClientLayout>
           </ResearchHistoryProvider>
         </AuthProvider>
       </body>

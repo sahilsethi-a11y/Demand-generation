@@ -55,7 +55,13 @@ def _decode_token(token: str) -> dict[str, Any]:
 # ── FastAPI dependencies ─────────────────────────────────────────────────────
 
 async def get_current_user(request: Request) -> dict[str, Any]:
-    token = request.cookies.get("auth_token")
+    # Accept Authorization: Bearer <token> header (cross-origin calls) or cookie
+    token: str | None = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    if not token:
+        token = request.cookies.get("auth_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = _decode_token(token)
@@ -78,6 +84,12 @@ class LoginRequest(BaseModel):
 class SeedRequest(BaseModel):
     email: str
     password: str
+
+
+class CreateUserRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "user"
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -108,6 +120,37 @@ async def logout(response: Response):
 @router.get("/me")
 async def me(user: dict = Depends(get_current_user)):
     return user
+
+
+@router.post("/users")
+async def create_user(body: CreateUserRequest, _admin: dict = Depends(require_admin)):
+    """Create a new user account (admin only)."""
+    existing = _user_store.get_user_by_email(body.email)
+    if existing:
+        raise HTTPException(status_code=409, detail="A user with that email already exists")
+    if body.role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
+    hashed = hash_password(body.password)
+    user = _user_store.create_user(body.email, hashed, role=body.role)
+    return {"message": "User created", "email": user["email"], "role": user["role"]}
+
+
+@router.get("/users")
+async def list_users(_admin: dict = Depends(require_admin)):
+    """List all users (admin only)."""
+    users = _user_store.list_users()
+    return {"users": users}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str, admin: dict = Depends(require_admin)):
+    """Delete a user (admin only, cannot delete yourself)."""
+    if user_id == admin["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    deleted = _user_store.delete_user(user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "User deleted"}
 
 
 @router.post("/seed")
