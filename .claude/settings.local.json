@@ -35,7 +35,24 @@
       "Bash(curl -s \"https://api.turso.tech/v1/locations\" -H \"Authorization: Bearer $\\(turso auth token\\)\")",
       "Bash(python3 -c \"import sys,json; locs=json.load\\(sys.stdin\\); [print\\(k,v\\) for k,v in sorted\\(locs.get\\('locations',{}\\).items\\(\\)\\)]\")",
       "Bash(wait)",
-      "Bash(.venv/bin/python3.11 create_admin.py sahil.sethi@emb.global Sahil@12345)"
+      "Bash(.venv/bin/python3.11 create_admin.py sahil.sethi@emb.global Sahil@12345)",
+      "Bash(.venv/bin/python3.11 -)",
+      "Read(//Users/sahil/.local/share/**)",
+      "Bash(curl -s -o /dev/null -w 'HTTP %{http_code} — Total: %{time_total}s \\(DNS: %{time_namelookup}s, Connect: %{time_connect}s, TTFB: %{time_starttransfer}s\\)\\\\n' -H 'Authorization: Bearer __CMDSUB_OUTPUT__')",
+      "Bash(curl -s http://localhost:8000/api/companies)",
+      "Bash(curl -s http://localhost:8000/api/outreach-log?limit=5)",
+      "Bash(curl -s \"http://localhost:8000/api/outreach-log?limit=5\")",
+      "Bash(curl -sv \"http://localhost:8000/api/outreach-log?limit=5\")",
+      "Bash(curl -s \"http://localhost:8000/api/outreach-log?limit=5\" -w \"\\\\n%{http_code}\")",
+      "Bash(curl -s \"http://localhost:8000/health\")",
+      "Bash(echo \"exit: $?\")",
+      "Bash(curl -s \"http://localhost:8000/api/companies\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d.get\\('total'\\), 'companies:', len\\(d.get\\('companies',[]\\)\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(curl -v \"http://localhost:8000/api/outreach-log?limit=5\")",
+      "Bash(curl -s \"http://localhost:8000/api/outreach-log?limit=5\" -H \"Accept: application/json\")",
+      "Bash(curl -s \"http://localhost:8000/api/pipeline/runs?limit=2\")",
+      "Bash(sqlite3 data/jobs.sqlite3 \".tables\")"
     ]
   }
 }

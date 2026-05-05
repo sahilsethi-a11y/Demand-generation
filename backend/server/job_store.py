@@ -13,126 +13,148 @@ _THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 class JobStore:
     def __init__(self, db_path: Path):
         self.db_path = db_path
+        self._initialized = False
 
     def _connect(self) -> sqlite3.Connection:
         return _db_connect(self.db_path, "TURSO_JOBS_DB_URL")
 
     def init_db(self) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS saved_jobs (
-                    job_key TEXT PRIMARY KEY,
-                    company_key TEXT,
-                    company_domain TEXT,
-                    source TEXT,
-                    title TEXT,
-                    organization TEXT,
-                    location TEXT,
-                    date_posted TEXT,
-                    payload_json TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+        if self._initialized:
+            return
+        self._initialized = True
+        conn = self._connect()
+
+        # Skip DDL if the main table already exists — avoids 20+ Turso round-trips per startup.
+        try:
+            conn.execute("SELECT 1 FROM saved_jobs LIMIT 1")
+            _needs_schema = False
+        except Exception:
+            _needs_schema = True
+
+        # Always ensure automation tables exist — they may have been added after the
+        # initial schema was created, so the _needs_schema shortcut would have skipped them.
+        try:
+            conn.execute("SELECT 1 FROM outreach_log LIMIT 1")
+        except Exception:
+            with conn as connection:
+                self._migrate_automation_tables(connection)
+
+        if _needs_schema:
+            with conn as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS saved_jobs (
+                        job_key TEXT PRIMARY KEY,
+                        company_key TEXT,
+                        company_domain TEXT,
+                        source TEXT,
+                        title TEXT,
+                        organization TEXT,
+                        location TEXT,
+                        date_posted TEXT,
+                        payload_json TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS company_contacts (
-                    contact_key TEXT PRIMARY KEY,
-                    company_key TEXT NOT NULL,
-                    name TEXT,
-                    title TEXT,
-                    email TEXT,
-                    linkedin_url TEXT,
-                    apollo_person_id TEXT,
-                    organization_id TEXT,
-                    organization_domain TEXT,
-                    confidence TEXT,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS company_contacts (
+                        contact_key TEXT PRIMARY KEY,
+                        company_key TEXT NOT NULL,
+                        name TEXT,
+                        title TEXT,
+                        email TEXT,
+                        linkedin_url TEXT,
+                        apollo_person_id TEXT,
+                        organization_id TEXT,
+                        organization_domain TEXT,
+                        confidence TEXT,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS company_enrichment (
-                    company_key TEXT PRIMARY KEY,
-                    company_name TEXT,
-                    company_domain TEXT,
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    confidence TEXT,
-                    error_message TEXT,
-                    contacts_count INTEGER NOT NULL DEFAULT 0,
-                    last_run_id TEXT,
-                    last_attempted_at INTEGER,
-                    last_completed_at INTEGER,
-                    updated_at INTEGER NOT NULL
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS company_enrichment (
+                        company_key TEXT PRIMARY KEY,
+                        company_name TEXT,
+                        company_domain TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        confidence TEXT,
+                        error_message TEXT,
+                        contacts_count INTEGER NOT NULL DEFAULT 0,
+                        last_run_id TEXT,
+                        last_attempted_at INTEGER,
+                        last_completed_at INTEGER,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """
                 )
-                """
-            )
-            self._migrate_saved_jobs_table(connection)
-            self._migrate_company_contacts_table(connection)
-            self._migrate_company_enrichment_table(connection)
-            self._backfill_saved_jobs_company_metadata(connection)
-            self._migrate_automation_tables(connection)
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_saved_jobs_updated_at ON saved_jobs(updated_at DESC)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_saved_jobs_company_key ON saved_jobs(company_key)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_company_contacts_company_key ON company_contacts(company_key)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_company_contacts_apollo_id ON company_contacts(apollo_person_id)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_company_contacts_linkedin ON company_contacts(linkedin_url)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_company_enrichment_status ON company_enrichment(status)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_arh_schedule_id ON automation_run_history(schedule_id)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_arh_triggered_at ON automation_run_history(triggered_at DESC)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ol_contact_key ON outreach_log(contact_key)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ol_company_key ON outreach_log(company_key)"
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_ol_sent_at ON outreach_log(sent_at DESC)"
-            )
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS outreach_emails (
-                    email_key TEXT PRIMARY KEY,
-                    company_key TEXT NOT NULL,
-                    contact_email TEXT,
-                    apollo_person_id TEXT,
-                    contact_name TEXT,
-                    contact_title TEXT,
-                    subject_1 TEXT,
-                    subject_2 TEXT,
-                    body TEXT,
-                    qa_status TEXT,
-                    approved INTEGER NOT NULL DEFAULT 0,
-                    pipeline_run_id TEXT,
-                    created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                self._migrate_saved_jobs_table(connection)
+                self._migrate_company_contacts_table(connection)
+                self._migrate_company_enrichment_table(connection)
+                self._backfill_saved_jobs_company_metadata(connection)
+                self._migrate_automation_tables(connection)
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_saved_jobs_updated_at ON saved_jobs(updated_at DESC)"
                 )
-                """
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_oe_company_key ON outreach_emails(company_key)"
-            )
-            connection.commit()
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_saved_jobs_company_key ON saved_jobs(company_key)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_company_contacts_company_key ON company_contacts(company_key)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_company_contacts_apollo_id ON company_contacts(apollo_person_id)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_company_contacts_linkedin ON company_contacts(linkedin_url)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_company_enrichment_status ON company_enrichment(status)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_arh_schedule_id ON automation_run_history(schedule_id)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_arh_triggered_at ON automation_run_history(triggered_at DESC)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ol_contact_key ON outreach_log(contact_key)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ol_company_key ON outreach_log(company_key)"
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_ol_sent_at ON outreach_log(sent_at DESC)"
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS outreach_emails (
+                        email_key TEXT PRIMARY KEY,
+                        company_key TEXT NOT NULL,
+                        contact_email TEXT,
+                        apollo_person_id TEXT,
+                        contact_name TEXT,
+                        contact_title TEXT,
+                        subject_1 TEXT,
+                        subject_2 TEXT,
+                        body TEXT,
+                        qa_status TEXT,
+                        approved INTEGER NOT NULL DEFAULT 0,
+                        pipeline_run_id TEXT,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_oe_company_key ON outreach_emails(company_key)"
+                )
+                connection.commit()
 
     def upsert_jobs(self, jobs: list[dict[str, Any]]) -> int:
         self.init_db()
@@ -645,24 +667,34 @@ class JobStore:
             )
             params.append(f"%{normalized_contact_title_query}%")
 
+        # Heavy fields not needed for the list view — strip them to reduce response size.
+        _STRIP_FIELDS = {
+            "description_text", "raw_payload", "search_metadata", "experience_text",
+            "ai_benefits", "ai_keywords", "ai_taxonomies_a", "ai_education_requirements",
+            "ai_core_responsibilities", "ai_requirements_summary", "ai_working_hours",
+            "modified_fields", "locations_raw", "locations_alt_raw", "location_requirements_raw",
+            "salary_raw", "lats_derived", "lngs_derived", "timezones_derived",
+        }
+
         where_sql = " AND ".join(where_clauses)
-        with self._connect() as connection:
-            total_row = connection.execute(
-                f"SELECT COUNT(*) AS count FROM saved_jobs WHERE {where_sql}",
-                tuple(params),
-            ).fetchone()
-            rows = connection.execute(
-                f"""
-                SELECT payload_json, company_key
-                FROM saved_jobs
-                WHERE {where_sql}
-                ORDER BY
-                    created_at DESC,
-                    updated_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                tuple([*params, safe_page_size, offset]),
-            ).fetchall()
+        # Use direct execute() without a transaction context — BEGIN on libsql costs ~300ms.
+        conn = self._connect()
+        total_row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM saved_jobs WHERE {where_sql}",
+            tuple(params),
+        ).fetchone()
+        rows = conn.execute(
+            f"""
+            SELECT payload_json, company_key
+            FROM saved_jobs
+            WHERE {where_sql}
+            ORDER BY
+                created_at DESC,
+                updated_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            tuple([*params, safe_page_size, offset]),
+        ).fetchall()
 
         company_keys = [row["company_key"] for row in rows if row["company_key"]]
         contacts_map, enrichment_map = self._load_company_metadata(company_keys)
@@ -671,6 +703,8 @@ class JobStore:
             payload = json.loads(row["payload_json"])
             if not isinstance(payload, dict):
                 continue
+            for f in _STRIP_FIELDS:
+                payload.pop(f, None)
             contacts = contacts_map.get(row["company_key"], [])
             enrichment = enrichment_map.get(row["company_key"], {})
             payload["job_key"] = self._job_key(payload)
@@ -834,36 +868,36 @@ class JobStore:
         if not unique_company_keys:
             return {}, {}
         placeholders = ", ".join("?" for _ in unique_company_keys)
-        with self._connect() as connection:
-            contact_rows = connection.execute(
-                f"""
-                SELECT
-                    company_key,
-                    name,
-                    title,
-                    email,
-                    linkedin_url,
-                    apollo_person_id,
-                    organization_id,
-                    organization_domain,
-                    confidence
-                FROM company_contacts
-                WHERE company_key IN ({placeholders})
-                ORDER BY
-                    CASE WHEN email IS NULL OR email = '' THEN 1 ELSE 0 END,
-                    title COLLATE NOCASE ASC,
-                    name COLLATE NOCASE ASC
-                """,
-                tuple(unique_company_keys),
-            ).fetchall()
-            enrichment_rows = connection.execute(
-                f"""
-                SELECT company_key, status, confidence, contacts_count, error_message
-                FROM company_enrichment
-                WHERE company_key IN ({placeholders})
-                """,
-                tuple(unique_company_keys),
-            ).fetchall()
+        conn = self._connect()
+        contact_rows = conn.execute(
+            f"""
+            SELECT
+                company_key,
+                name,
+                title,
+                email,
+                linkedin_url,
+                apollo_person_id,
+                organization_id,
+                organization_domain,
+                confidence
+            FROM company_contacts
+            WHERE company_key IN ({placeholders})
+            ORDER BY
+                CASE WHEN email IS NULL OR email = '' THEN 1 ELSE 0 END,
+                title COLLATE NOCASE ASC,
+                name COLLATE NOCASE ASC
+            """,
+            tuple(unique_company_keys),
+        ).fetchall()
+        enrichment_rows = conn.execute(
+            f"""
+            SELECT company_key, status, confidence, contacts_count, error_message
+            FROM company_enrichment
+            WHERE company_key IN ({placeholders})
+            """,
+            tuple(unique_company_keys),
+        ).fetchall()
 
         contacts_map: dict[str, list[dict[str, Any]]] = {key: [] for key in unique_company_keys}
         for row in contact_rows:

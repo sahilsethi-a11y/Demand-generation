@@ -48,8 +48,22 @@ interface CompanyOutreachStats {
   entries: OutreachEntry[];
 }
 
+interface CompanyEmployee {
+  name?: string;
+  title?: string;
+  email?: string;
+  phone?: string;
+  linkedin_url?: string;
+}
+
+interface CompanyDetail extends Company {
+  employees?: CompanyEmployee[];
+  all_employees?: CompanyEmployee[];
+}
+
 type SortKey = "name" | "icp" | "employees" | "emails" | "contacted" | "last_contact" | "updated";
 type FilterMode = "all" | "contacted" | "not_contacted";
+type MetricKey = "total_employees" | "enriched" | "icp_contacts" | "verified_emails";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -66,7 +80,15 @@ function formatDomain(company: Company) {
 
 // ── Expanded row ───────────────────────────────────────────────────────────────
 
-function ExpandedRow({ company, outreach }: { company: Company; outreach?: CompanyOutreachStats }) {
+function ExpandedRow({
+  company,
+  outreach,
+  onMetricClick,
+}: {
+  company: Company;
+  outreach?: CompanyOutreachStats;
+  onMetricClick: (metric: MetricKey) => void;
+}) {
   const contactMap = new Map<string, OutreachEntry[]>();
   for (const e of outreach?.entries || []) {
     const key = e.contact_key;
@@ -101,15 +123,19 @@ function ExpandedRow({ company, outreach }: { company: Company; outreach?: Compa
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Enrichment</p>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: "Total Employees", value: company.total_employees_count },
-                { label: "ICP Contacts", value: company.icp_employees_count },
-                { label: "Enriched", value: company.employees_count },
-                { label: "Verified Emails", value: company.verified_emails_count },
-              ].map(({ label, value }) => (
-                <div key={label} className="bg-white rounded-lg px-3 py-2 border border-slate-200">
+                { label: "Total Employees", value: company.total_employees_count, key: "total_employees" as MetricKey },
+                { label: "ICP Contacts", value: company.icp_employees_count, key: "icp_contacts" as MetricKey },
+                { label: "Enriched", value: company.employees_count, key: "enriched" as MetricKey },
+                { label: "Verified Emails", value: company.verified_emails_count, key: "verified_emails" as MetricKey },
+              ].map(({ label, value, key }) => (
+                <button
+                  key={label}
+                  onClick={() => onMetricClick(key)}
+                  className="bg-white rounded-lg px-3 py-2 border border-slate-200 text-left hover:border-brand-primary/40 hover:bg-blue-50/50 transition-colors"
+                >
                   <p className="text-lg font-bold text-brand-primary">{value}</p>
-                  <p className="text-[10px] text-slate-400">{label}</p>
-                </div>
+                  <p className="text-[10px] text-slate-500">{label}</p>
+                </button>
               ))}
             </div>
           </div>
@@ -158,6 +184,10 @@ export default function CompaniesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalCompanies, setTotalCompanies] = useState(0);
+  const [metricModal, setMetricModal] = useState<{ company: Company; metric: MetricKey } | null>(null);
+  const [metricLoading, setMetricLoading] = useState(false);
+  const [metricError, setMetricError] = useState<string | null>(null);
+  const [metricRows, setMetricRows] = useState<CompanyEmployee[]>([]);
   const PAGE_SIZE = 50;
 
   useEffect(() => {
@@ -257,6 +287,43 @@ export default function CompaniesPage() {
 
   const contactedCount = companies.filter((c) => outreachMap.has(c.company_key)).length;
   const totalPages = Math.ceil(totalCompanies / PAGE_SIZE);
+
+  async function openMetricData(company: Company, metric: MetricKey) {
+    setMetricModal({ company, metric });
+    setMetricLoading(true);
+    setMetricError(null);
+    setMetricRows([]);
+    try {
+      const res = await apiFetch(`/api/companies/${company.id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to load company details");
+      const detail: CompanyDetail | undefined = data?.company;
+      const allEmployees = Array.isArray(detail?.all_employees) ? detail!.all_employees! : [];
+      const icpEmployees = Array.isArray(detail?.employees) ? detail!.employees! : [];
+
+      let rows: CompanyEmployee[] = [];
+      if (metric === "total_employees") rows = allEmployees.length ? allEmployees : icpEmployees;
+      if (metric === "enriched") rows = icpEmployees;
+      if (metric === "icp_contacts") rows = icpEmployees;
+      if (metric === "verified_emails") rows = icpEmployees.filter((person) => Boolean(person.email));
+      setMetricRows(rows);
+    } catch (e: any) {
+      setMetricError(e.message || "Failed to load metric details");
+    } finally {
+      setMetricLoading(false);
+    }
+  }
+
+  const metricTitle = useMemo(() => {
+    if (!metricModal) return "";
+    const labels: Record<MetricKey, string> = {
+      total_employees: "Total Employees",
+      enriched: "Enriched",
+      icp_contacts: "ICP Contacts",
+      verified_emails: "Verified Emails",
+    };
+    return labels[metricModal.metric];
+  }, [metricModal]);
 
   return (
     <div className="min-h-screen bg-brand-surface">
@@ -436,7 +503,12 @@ export default function CompaniesPage() {
                           </td>
                         </tr>
                         {isExpanded && (
-                          <ExpandedRow key={`${company.id}-expanded`} company={company} outreach={outreach} />
+                          <ExpandedRow
+                            key={`${company.id}-expanded`}
+                            company={company}
+                            outreach={outreach}
+                            onMetricClick={(metric) => openMetricData(company, metric)}
+                          />
                         )}
                       </>
                     );
@@ -471,6 +543,63 @@ export default function CompaniesPage() {
         )}
 
       </div>
+
+      {metricModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center px-4">
+          <div className="w-full max-w-3xl bg-white border border-brand-border rounded-xl shadow-xl max-h-[80vh] overflow-hidden">
+            <div className="px-5 py-3 border-b border-brand-border flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-brand-secondary">{metricTitle}</p>
+                <p className="text-xs text-slate-500">{metricModal.company.name}</p>
+              </div>
+              <button
+                onClick={() => setMetricModal(null)}
+                className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
+              >
+                Close
+              </button>
+            </div>
+            <div className="p-4 overflow-auto max-h-[65vh]">
+              {metricLoading ? (
+                <LoadingSpinner label="Loading metric details..." />
+              ) : metricError ? (
+                <p className="text-sm text-red-500">{metricError}</p>
+              ) : metricRows.length === 0 ? (
+                <p className="text-sm text-slate-500">No records found.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b border-brand-border">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Title</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">LinkedIn</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-brand-border">
+                      {metricRows.map((person, idx) => (
+                        <tr key={`${person.email || person.linkedin_url || person.name || "row"}-${idx}`}>
+                          <td className="px-3 py-2 text-xs text-slate-700">{person.name || "—"}</td>
+                          <td className="px-3 py-2 text-xs text-slate-600">{person.title || "—"}</td>
+                          <td className="px-3 py-2 text-xs text-slate-600">{person.email || "—"}</td>
+                          <td className="px-3 py-2 text-xs text-slate-600">
+                            {person.linkedin_url ? (
+                              <a href={person.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-brand-primary hover:underline">
+                                Profile
+                              </a>
+                            ) : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

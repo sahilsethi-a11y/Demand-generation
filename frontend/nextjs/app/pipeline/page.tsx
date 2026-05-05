@@ -13,7 +13,6 @@ const ACTOR_COSTS = {
   india: {
     linkedin: { label: "LinkedIn", costPer1k: null, flatNote: "$29.99/mo + CU usage", baseTip: "Flat $29.99/mo subscription + Apify compute units (~$0.025/run). Rental model retires Oct 2026." },
     naukri: { label: "Naukri", costPer1k: 5.0, baseTip: "$5.00 / 1K jobs" },
-    indeed: { label: "Indeed", costPer1k: 5.0, baseTip: "$5.00 / 1K jobs" },
   },
 } as const;
 
@@ -147,7 +146,7 @@ export default function PipelinePage() {
       setSelectedSources(["greenhouse", "ashby", "lever"]);
       setLocation((loc) => (loc === "India" ? "" : loc));
     } else {
-      setSelectedSources(["linkedin", "naukri", "indeed"]);
+      setSelectedSources(["linkedin", "naukri"]);
     }
   }, [market]);
 

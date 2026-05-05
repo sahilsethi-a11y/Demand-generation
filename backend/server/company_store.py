@@ -327,6 +327,59 @@ class CompanyStore:
             now_ms,
         )
 
+    def upsert_company_sync(self, company_id: str, company: dict[str, Any]) -> None:
+        """Sync version of upsert_company for use from background task threads."""
+        now_ms = int(time.time() * 1000)
+        with self._connect() as connection:
+            existing_row = connection.execute(
+                "SELECT payload_json, created_at FROM companies WHERE id = ?",
+                (company_id,),
+            ).fetchone()
+            existing_payload: dict[str, Any] | None = None
+            if existing_row:
+                try:
+                    parsed = json.loads(existing_row["payload_json"])
+                    if isinstance(parsed, dict):
+                        existing_payload = parsed
+                except Exception:
+                    pass
+            merged = self._merge_companies(existing_payload or {}, {**company, "id": company_id})
+            record = self._build_record(
+                merged,
+                existing={"created_at": existing_row["created_at"]} if existing_row else None,
+                now_ms=now_ms,
+            )
+            connection.execute(
+                """
+                INSERT INTO companies (
+                    id, company_key, name, website_url, linkedin_url,
+                    organization_domain, apollo_org_id, hq, source,
+                    total_employees_count, icp_employees_count, employees_count,
+                    verified_emails_count, portfolio_companies_count,
+                    payload_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    company_key = excluded.company_key,
+                    name = excluded.name,
+                    website_url = excluded.website_url,
+                    linkedin_url = excluded.linkedin_url,
+                    organization_domain = excluded.organization_domain,
+                    apollo_org_id = excluded.apollo_org_id,
+                    hq = excluded.hq,
+                    source = excluded.source,
+                    total_employees_count = excluded.total_employees_count,
+                    icp_employees_count = excluded.icp_employees_count,
+                    employees_count = excluded.employees_count,
+                    verified_emails_count = excluded.verified_emails_count,
+                    portfolio_companies_count = excluded.portfolio_companies_count,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                record,
+            )
+            connection.commit()
+
     async def find_company_by_key(self, company: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
         target_key = self._normalize_key(company)
         if not target_key:

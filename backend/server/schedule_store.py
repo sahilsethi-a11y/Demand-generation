@@ -451,7 +451,7 @@ class ScheduleStore:
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT * FROM outreach_log {where} ORDER BY sent_at DESC LIMIT ? OFFSET ?",
-                params,
+                tuple(params),
             ).fetchall()
         return [dict(r) for r in rows]
 

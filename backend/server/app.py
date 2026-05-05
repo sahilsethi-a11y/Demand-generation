@@ -138,6 +138,7 @@ class PipelineRunRequest(BaseModel):
     campaign_id: str | None = None
     titles: List[str] | None = None
     target_emails: int = 250  # India smart-fetch: keep enriching until this many emails are ready
+    test_mode: bool = False
 
 
 class CompanyPayload(BaseModel):
@@ -1673,7 +1674,8 @@ def _run_pipeline(
     # Automation dedup settings (only active when called from scheduler)
     _schedule_id = (automation_context or {}).get("schedule_id")
     _run_history_id = (automation_context or {}).get("run_history_id")
-    _skip_contacted_companies = bool(request_data.get("skip_contacted_companies", False)) if automation_context else False
+    _is_automation_run = bool(automation_context and _schedule_id and _schedule_id != "manual")
+    _skip_contacted_companies = bool(request_data.get("skip_contacted_companies", False)) if _is_automation_run else False
     _dedup_lookback_days = int(request_data.get("dedup_lookback_days") or 90)
     _companies_skipped_dedup = 0
     _contacts_skipped_dedup = 0
@@ -1738,7 +1740,7 @@ def _run_pipeline(
         company_targets = _extract_company_targets(all_jobs)
 
         # Dedup: skip companies already contacted within the lookback window
-        if _skip_contacted_companies and automation_context:
+        if _skip_contacted_companies and _is_automation_run:
             contacted_company_keys = schedule_store.get_contacted_company_keys(_dedup_lookback_days)
             before_count = len(company_targets)
             company_targets = [c for c in company_targets if c.get("company_key") not in contacted_company_keys]
@@ -1746,8 +1748,9 @@ def _run_pipeline(
             if _companies_skipped_dedup:
                 logger.info("Automation dedup: skipped %d already-contacted companies", _companies_skipped_dedup)
 
-        # For US, cap at max_companies. For India, we manage count via the enrichment loop.
-        if not is_india and len(company_targets) > max_companies:
+        # Test mode: always take just 1 company regardless of region.
+        # Normal mode: for US cap here; for India the enrichment loop manages the count.
+        if test_mode or (not is_india and len(company_targets) > max_companies):
             company_targets = company_targets[:max_companies]
 
         dedup_note = f" ({_companies_skipped_dedup} skipped — already contacted)" if _companies_skipped_dedup else ""
@@ -1810,6 +1813,34 @@ def _run_pipeline(
                         contacts=contacts if isinstance(contacts, list) else [],
                         confidence=str(result.get("match_strategy") or ""),
                         run_id=run_id,
+                    )
+                    # Write to company_store so Companies and Leads pages show this company
+                    all_people = result.get("all_people") or []
+                    company_store.upsert_company_sync(
+                        company_key,
+                        {
+                            "id": company_key,
+                            "name": company_name,
+                            "website_url": f"https://{company_domain}" if company_domain else "",
+                            "organization_domain": company_domain or "",
+                            "source": "pipeline",
+                            "total_employees_count": result.get("people_count") or len(all_people),
+                            "employees": [
+                                {
+                                    "name": c.get("name"),
+                                    "title": c.get("title"),
+                                    "email": c.get("email"),
+                                    "linkedin_url": c.get("linkedin_url"),
+                                    "apollo_person_id": c.get("apollo_person_id"),
+                                    "icp_reason": c.get("icp_reason"),
+                                }
+                                for c in (contacts if isinstance(contacts, list) else [])
+                            ],
+                            "all_employees": [
+                                {"name": p.get("name"), "title": p.get("title"), "linkedin_url": p.get("linkedin_url")}
+                                for p in all_people
+                            ],
+                        },
                     )
                     for contact in (contacts or []):
                         contact["_company_key"] = company_key
@@ -1883,7 +1914,7 @@ def _run_pipeline(
                     _enrich_company(target, _global_idx, len(_company_pool))
 
                 # Check whether we need more companies (India only)
-                if not is_india or _valid_email_count >= target_emails:
+                if test_mode or not is_india or _valid_email_count >= target_emails:
                     break
                 if _refetch_count >= _INDIA_MAX_REFETCHES:
                     logger.info(
@@ -1945,6 +1976,10 @@ def _run_pipeline(
                         "target_emails": target_emails, "companies": len(_processed_keys)},
             )
 
+        # Test mode: hard-cap ICPs so email generation and Instantly send are bounded.
+        if test_mode and len(all_icps) > max_icps:
+            all_icps = all_icps[:max_icps]
+
         # ── Stage 5: Email Enrichment (already done via bulk_match in Stage 3) ─
         _pipeline_stage_event(
             run_id, "email_enrichment", "done",
@@ -1959,7 +1994,7 @@ def _run_pipeline(
 
             # Contact-level dedup: skip ICPs already in outreach_log
             icps_to_generate = all_icps
-            if automation_context:
+            if _is_automation_run:
                 contacted_contact_keys = schedule_store.get_contacted_contact_keys()
                 before_icp_count = len(icps_to_generate)
                 filtered_icps = []
@@ -2173,6 +2208,7 @@ async def start_pipeline_run(request: PipelineRunRequest, background_tasks: Back
         "max_icps_per_company": request.max_icps_per_company,
         "campaign_id": request.campaign_id or os.getenv("INSTANTLY_CAMPAIGN_ID", ""),
         "titles": request.titles,
+        "test_mode": request.test_mode,
     }
 
     _update_pipeline_run(
@@ -2192,8 +2228,13 @@ async def start_pipeline_run(request: PipelineRunRequest, background_tasks: Back
         pipeline_run_id=run_id,
         triggered_by_email=current_user["email"],
     )
-    background_tasks.add_task(_run_pipeline, run_id, request_data, None, current_user["email"])
-    _ = run_history_id
+    background_tasks.add_task(
+        _run_pipeline,
+        run_id,
+        request_data,
+        {"schedule_id": "manual", "run_history_id": run_history_id},
+        current_user["email"],
+    )
 
     return {
         "run_id": run_id,
