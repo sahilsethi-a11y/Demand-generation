@@ -4,7 +4,24 @@
       "WebSearch",
       "WebFetch(domain:apify.com)",
       "Bash(xargs ls *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git commit *)",
+      "Bash(turso --version)",
+      "Bash(brew install *)",
+      "Bash(curl -sSfL https://get.tur.so/install.sh)",
+      "Bash(bash)",
+      "Bash(export PATH=\"$PATH:/Users/sahil/.turso\")",
+      "Bash(turso auth *)",
+      "Bash(turso db *)",
+      "Bash(turso group *)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//usr/bin/**)",
+      "Bash(python3.11 --version)",
+      "Bash(python3.12 --version)",
+      "Bash(npm list *)",
+      "Bash(openssl rand *)",
+      "Bash(echo \"JWT_SECRET=$\\(openssl rand -hex 32\\)\")",
+      "Bash(npm install *)"
     ]
   }
 }
