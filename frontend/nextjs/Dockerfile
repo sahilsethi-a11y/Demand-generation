@@ -17,6 +17,11 @@ FROM node:18.17.0-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# NEXT_PUBLIC_* vars are inlined at build time — must be passed as build args
+ARG NEXT_PUBLIC_GPTR_API_URL
+ENV NEXT_PUBLIC_GPTR_API_URL=${NEXT_PUBLIC_GPTR_API_URL}
+
 # Build Next.js application (produces .next)
 RUN npm run build \
 	&& npm prune --production

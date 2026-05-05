@@ -21,9 +21,15 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
+      const raw = await res.text();
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = {};
+      }
       if (!res.ok) {
-        const data = await res.json();
-        setError(data.detail || "Invalid email or password");
+        setError(data.detail || `Login failed (${res.status})`);
         return;
       }
       router.push("/pipeline");
