@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { ResearchHistoryProvider } from "@/hooks/ResearchHistoryContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import AppNav from "@/components/AppNav";
 import "./globals.css";
 
@@ -24,12 +25,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.className} bg-brand-surface text-brand-secondary min-h-screen`} suppressHydrationWarning>
-        <ResearchHistoryProvider>
-          <div className="flex min-h-screen">
-            <AppNav />
-            <main className="flex-1 ml-56 overflow-auto">{children}</main>
-          </div>
-        </ResearchHistoryProvider>
+        <AuthProvider>
+          <ResearchHistoryProvider>
+            <div className="flex min-h-screen">
+              <AppNav />
+              <main className="flex-1 ml-56 overflow-auto">{children}</main>
+            </div>
+          </ResearchHistoryProvider>
+        </AuthProvider>
       </body>
     </html>
   );

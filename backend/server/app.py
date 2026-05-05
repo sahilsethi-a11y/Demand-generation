@@ -54,6 +54,8 @@ from gpt_researcher.config import Config
 from server.job_store import JobStore
 from server.report_store import ReportStore
 from server.schedule_store import ScheduleStore
+from server.user_store import UserStore
+from server.auth_router import router as auth_router, set_user_store, get_current_user, require_admin
 from gpt_researcher.retrievers.tavily.tavily_search import TavilySearch
 from services.job_search_agent import JobSearchError, run_job_search_workflow
 
@@ -211,6 +213,8 @@ async def lifespan(app: FastAPI):
     os.makedirs("outputs", exist_ok=True)
     company_store.init_db()
     job_store.init_db()
+    user_store.init_db()
+    set_user_store(user_store)
     app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 
     # Mount frontend static files
@@ -237,6 +241,7 @@ async def lifespan(app: FastAPI):
 
 # App initialization
 app = FastAPI(lifespan=lifespan)
+app.include_router(auth_router)
 
 # Configure allowed origins for CORS
 allowed_origins_env = os.getenv("CORS_ALLOW_ORIGINS")
@@ -280,6 +285,7 @@ company_store = CompanyStore(
 )
 job_store = JobStore(Path(os.getenv("JOBS_DB_PATH", os.path.join("data", "jobs.sqlite3"))))
 schedule_store = ScheduleStore(Path(os.getenv("JOBS_DB_PATH", os.path.join("data", "jobs.sqlite3"))))
+user_store = UserStore(Path(os.getenv("JOBS_DB_PATH", os.path.join("data", "jobs.sqlite3"))))
 job_enrichment_runs: dict[str, dict[str, Any]] = {}
 pipeline_runs: dict[str, dict[str, Any]] = {}
 
@@ -645,6 +651,22 @@ def _run_apollo_company_enrichment(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/runs")
+async def list_runs(
+    limit: int = 100,
+    offset: int = 0,
+    _user: dict = Depends(get_current_user),
+):
+    runs = schedule_store.list_all_run_history(limit=limit, offset=offset)
+    return {"runs": runs, "total": len(runs)}
+
+
+@app.get("/api/runs/{run_id}/emails")
+async def get_run_emails(run_id: str, _user: dict = Depends(get_current_user)):
+    emails = job_store.get_outreach_emails_for_run(run_id)
+    return {"emails": emails, "total": len(emails)}
 
 @app.get("/", response_class=HTMLResponse)
 async def serve_frontend():
@@ -1598,6 +1620,7 @@ def _run_pipeline(
     run_id: str,
     request_data: dict[str, Any],
     automation_context: dict[str, Any] | None = None,
+    triggered_by_email: str | None = None,
 ) -> None:
     """Background task that orchestrates all pipeline stages sequentially.
 
@@ -2105,7 +2128,7 @@ def _run_pipeline(
 
 
 @app.post("/api/pipeline/run")
-async def start_pipeline_run(request: PipelineRunRequest, background_tasks: BackgroundTasks):
+async def start_pipeline_run(request: PipelineRunRequest, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     """Start a full demand generation pipeline run.
 
     Orchestrates: Job Search → Company Extraction → People Discovery →
@@ -2143,7 +2166,13 @@ async def start_pipeline_run(request: PipelineRunRequest, background_tasks: Back
         created_at=int(time.time() * 1000),
     )
 
-    background_tasks.add_task(_run_pipeline, run_id, request_data)
+    run_history_id = schedule_store.create_run_history(
+        schedule_id="manual",
+        pipeline_run_id=run_id,
+        triggered_by_email=current_user["email"],
+    )
+    background_tasks.add_task(_run_pipeline, run_id, request_data, None, current_user["email"])
+    _ = run_history_id
 
     return {
         "run_id": run_id,

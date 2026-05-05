@@ -384,6 +384,21 @@ class JobStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_outreach_emails_for_run(self, pipeline_run_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT contact_name, contact_title, contact_email,
+                       subject_1, subject_2, body, qa_status, approved,
+                       company_key, pipeline_run_id, updated_at
+                FROM outreach_emails
+                WHERE pipeline_run_id = ?
+                ORDER BY approved DESC, updated_at DESC
+                """,
+                (pipeline_run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_company_contacts_for_key(self, company_key: str) -> list[dict[str, Any]]:
         self.init_db()
         normalized = (company_key or "").strip().lower()
@@ -993,6 +1008,19 @@ class JobStore:
                 connection.execute("ALTER TABLE automation_schedules ADD COLUMN cron_expr TEXT")
         except Exception:
             pass
+
+        # Add triggered_by_email to run history
+        try:
+            cols = {r["name"] for r in connection.execute("PRAGMA table_info(automation_run_history)").fetchall()}
+            if "triggered_by_email" not in cols:
+                connection.execute("ALTER TABLE automation_run_history ADD COLUMN triggered_by_email TEXT")
+        except Exception:
+            pass
+
+        # Index for fast per-run email lookups
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_oe_pipeline_run_id ON outreach_emails(pipeline_run_id)"
+        )
 
     @staticmethod
     def _migrate_saved_jobs_table(connection: sqlite3.Connection) -> None:

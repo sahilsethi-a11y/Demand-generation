@@ -47,7 +47,8 @@
     "remark-parse": "^11.0.0",
     "zod": "^3.0.0",
     "zod-to-json-schema": "^3.23.0",
-    "@ducanh2912/next-pwa": "^10.0.1"
+    "@ducanh2912/next-pwa": "^10.0.1",
+    "jose": "^5.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.26.9",

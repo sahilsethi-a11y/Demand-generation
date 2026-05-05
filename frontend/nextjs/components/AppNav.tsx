@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   {
     href: "/pipeline",
     label: "Pipeline",
@@ -19,6 +20,15 @@ const NAV_ITEMS = [
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/runs",
+    label: "Runs",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
       </svg>
     ),
   },
@@ -68,6 +78,9 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+];
+
+const ADMIN_NAV_ITEMS = [
   {
     href: "/test",
     label: "Test Console",
@@ -82,6 +95,11 @@ const NAV_ITEMS = [
 
 export default function AppNav() {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+
+  const navItems = user?.role === "admin"
+    ? [...BASE_NAV_ITEMS, ...ADMIN_NAV_ITEMS]
+    : BASE_NAV_ITEMS;
 
   return (
     <aside className="fixed left-0 top-0 h-full w-56 bg-brand-secondary flex flex-col z-50">
@@ -101,8 +119,8 @@ export default function AppNav() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {NAV_ITEMS.map((item) => {
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        {navItems.map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
@@ -116,9 +134,9 @@ export default function AppNav() {
             >
               <span className={isActive ? "text-white" : "text-white/50"}>{item.icon}</span>
               <span className="flex-1">{item.label}</span>
-              {(item as any).badge && (
+              {"badge" in item && typeof item.badge === "string" && (
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 leading-none">
-                  {(item as any).badge}
+                  {item.badge}
                 </span>
               )}
             </Link>
@@ -126,17 +144,28 @@ export default function AppNav() {
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-white/10">
-        <p className="text-white/30 text-xs">EMB Global · Series A</p>
-        <a
-          href="https://embtalent.ai"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-white/40 text-xs hover:text-white/70 transition-colors"
+      {/* User + Logout */}
+      <div className="px-4 py-3 border-t border-white/10">
+        {user && (
+          <div className="mb-3">
+            <p className="text-white/70 text-xs font-medium truncate">{user.email}</p>
+            <p className="text-white/30 text-[11px] capitalize">{user.role}</p>
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="w-full text-left text-white/40 hover:text-white/70 text-xs transition-colors flex items-center gap-1.5"
         >
-          embtalent.ai ↗
-        </a>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          Sign out
+        </button>
+      </div>
+
+      {/* Footer */}
+      <div className="px-5 py-3 border-t border-white/10">
+        <p className="text-white/30 text-xs">EMB Global · Series A</p>
       </div>
     </aside>
   );

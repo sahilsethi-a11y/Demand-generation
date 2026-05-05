@@ -68,3 +68,7 @@ markdown>=3.5.1
 
 # Turso (libsql) — remote SQLite; falls back to local sqlite3 when env vars are unset
 libsql-experimental>=0.0.11
+
+# Auth
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4

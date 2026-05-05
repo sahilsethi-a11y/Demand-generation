@@ -254,17 +254,23 @@ class ScheduleStore:
 
     # ── Run History ──────────────────────────────────────────────────────────
 
-    def create_run_history(self, schedule_id: str, pipeline_run_id: str) -> str:
+    def create_run_history(
+        self,
+        schedule_id: str,
+        pipeline_run_id: str,
+        triggered_by_email: str | None = None,
+    ) -> str:
         run_history_id = str(uuid.uuid4())
         now = int(time.time() * 1000)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO automation_run_history
-                  (run_history_id, schedule_id, pipeline_run_id, status, triggered_at, created_at)
-                VALUES (?, ?, ?, 'queued', ?, ?)
+                  (run_history_id, schedule_id, pipeline_run_id, status,
+                   triggered_at, created_at, triggered_by_email)
+                VALUES (?, ?, ?, 'queued', ?, ?, ?)
                 """,
-                (run_history_id, schedule_id, pipeline_run_id, now, now),
+                (run_history_id, schedule_id, pipeline_run_id, now, now, triggered_by_email),
             )
             conn.commit()
         return run_history_id
@@ -319,6 +325,18 @@ class ScheduleStore:
                 LIMIT ?
                 """,
                 (schedule_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_all_run_history(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM automation_run_history
+                ORDER BY triggered_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
 
