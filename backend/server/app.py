@@ -2072,7 +2072,10 @@ def _run_pipeline(
                     for r in outreach_results
                     if r.get("qa", {}).get("approved_for_export") and r.get("instantly_payload")
                 ]
-                send_result = send_leads_to_instantly(leads_to_send, campaign_id, instantly_api_key)
+                send_result = send_leads_to_instantly(
+                    leads_to_send, campaign_id, instantly_api_key,
+                    sender_name=os.getenv("INSTANTLY_SENDER_NAME", "EMB Global"),
+                )
                 if send_result.get("status") == "sent":
                     _pipeline_stage_event(
                         run_id, "instantly_send", "done",
@@ -2691,7 +2694,10 @@ async def test_instantly_send(request: TestInstantlySendRequest):
     if not request.leads:
         raise HTTPException(status_code=400, detail="No leads provided")
 
-    result = await send_leads_to_instantly(request.leads, campaign_id, api_key)
+    result = await send_leads_to_instantly(
+        request.leads, campaign_id, api_key,
+        sender_name=os.getenv("INSTANTLY_SENDER_NAME", "EMB Global"),
+    )
     return result
 
 

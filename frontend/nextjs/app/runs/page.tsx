@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/utils/apiFetch";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 interface Run {
   run_history_id: string;
@@ -100,7 +101,7 @@ export default function RunsPage() {
         </div>
 
         {loading ? (
-          <p className="text-slate-400 text-sm">Loading…</p>
+          <LoadingSpinner label="Loading runs..." />
         ) : runs.length === 0 ? (
           <div className="bg-white border border-brand-border rounded-xl px-6 py-12 text-center shadow-sm">
             <p className="text-slate-400 text-sm">No runs yet. Start a pipeline run from the Pipeline tab.</p>

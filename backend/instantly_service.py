@@ -1,20 +1,41 @@
 """Instantly.ai lead delivery service.
 
-Sends enriched, email-generated ICP leads to an Instantly campaign.
+Sends enriched ICP leads to an Instantly campaign.
 Handles deduplication via skip_if_in_workspace and records send status.
+
+Sequence variables injected per lead:
+  {{Name}}         — contact first name  (Instantly standard: first_name)
+  {{Role}}         — job title the company is hiring for (custom variable)
+  {{Sender Name}}  — configured via INSTANTLY_SENDER_NAME env var (custom variable)
+
+Two sequence templates (A and B) are assigned alternately for A/B tracking.
+The assignment is stored in custom_variables.sequence so Instantly can filter.
 """
 
+import os
+import random
 from typing import Optional
 import requests
 
 INSTANTLY_BASE_URL = "https://api.instantly.ai/api/v2"
 INSTANTLY_LEADS_URL = f"{INSTANTLY_BASE_URL}/leads/add"
 
+_SEQUENCE_COUNTER = 0
+
+
+def _next_sequence() -> str:
+    """Alternate A/B sequence assignment across leads."""
+    global _SEQUENCE_COUNTER
+    seq = "A" if _SEQUENCE_COUNTER % 2 == 0 else "B"
+    _SEQUENCE_COUNTER += 1
+    return seq
+
 
 def send_leads_to_instantly(
     leads: list[dict],
     campaign_id: str,
     api_key: str,
+    sender_name: str = "",
 ) -> dict:
     """Send a batch of leads to an Instantly campaign.
 
@@ -24,26 +45,29 @@ def send_leads_to_instantly(
     if not leads:
         return {"status": "skipped", "sent_count": 0, "message": "No leads to send."}
 
+    _sender_name = sender_name or os.getenv("INSTANTLY_SENDER_NAME", "EMB Global")
+
     instantly_leads = []
     for lead in leads:
+        first_name = lead.get("first_name") or ""
+        role = lead.get("job_title") or lead.get("contact_title") or ""
+        sequence = _next_sequence()
+
         instantly_lead = {
             "email": lead.get("to_email") or lead.get("email"),
-            "first_name": lead.get("first_name") or "",
+            "first_name": first_name,
             "last_name": lead.get("last_name") or "",
             "company_name": lead.get("company_name") or "",
             "website": f"https://{lead['company_domain']}" if lead.get("company_domain") else None,
-            "personalization": lead.get("email_body") or "",
             "custom_variables": {
-                "subject_1": lead.get("subject_1") or "",
-                "subject_2": lead.get("subject_2") or "",
-                "email_body": lead.get("email_body") or "",
-                "signal_summary": lead.get("signal_summary") or "",
-                "job_title": lead.get("job_title") or "",
-                "company_domain": lead.get("company_domain") or "",
+                # Sequence template variables — match {{...}} placeholders exactly
+                "Role": role,
+                "Sender Name": _sender_name,
+                # Tracking / extra context
+                "sequence": sequence,
                 "contact_title": lead.get("contact_title") or "",
-                "priority": lead.get("priority") or "medium",
+                "company_domain": lead.get("company_domain") or "",
                 "source": lead.get("source") or "",
-                "first_name": lead.get("first_name") or "",
             },
         }
         # Remove None values to keep the payload clean

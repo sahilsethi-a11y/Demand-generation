@@ -57,7 +57,9 @@ services:
       - key: INSTANTLY_API_KEY
         value: CHANGE_ME
       - key: INSTANTLY_CAMPAIGN_ID
-        value: CHANGE_ME
+        value: f4ff0ac8-209d-4de0-ad02-e70f0cf2105d
+      - key: INSTANTLY_SENDER_NAME
+        value: Sahil
 
       # ── Community signals (Discord) ───────────────────────────────────────
       - key: DISCORD_BOT_TOKEN

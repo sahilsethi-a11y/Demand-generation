@@ -4,6 +4,7 @@ import { apiFetch } from "@/utils/apiFetch";
 
 import { useState, useEffect, useCallback } from "react";
 import JobDetailModal from "@/components/JobDetailModal";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 const API_BASE = process.env.NEXT_PUBLIC_GPTR_API_URL || "http://localhost:8000";
 
@@ -133,7 +134,7 @@ export default function JobsPage() {
         {/* Jobs table */}
         <div className="bg-white border border-brand-border rounded-xl overflow-hidden shadow-sm">
           {loading ? (
-            <div className="px-6 py-12 text-center text-slate-400 text-sm">Loading jobs...</div>
+            <LoadingSpinner label="Loading jobs..." />
           ) : jobs.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <p className="text-slate-400 text-sm">No jobs found.</p>

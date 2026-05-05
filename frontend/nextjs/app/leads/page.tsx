@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/utils/apiFetch";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -149,7 +150,7 @@ export default function LeadsPage() {
         {/* Table */}
         <div className="bg-white border border-brand-border rounded-xl overflow-hidden shadow-sm">
           {loading ? (
-            <div className="px-6 py-12 text-center text-slate-400 text-sm">Loading leads...</div>
+            <LoadingSpinner label="Loading leads..." />
           ) : filtered.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <p className="text-slate-400 text-sm">No leads yet.</p>

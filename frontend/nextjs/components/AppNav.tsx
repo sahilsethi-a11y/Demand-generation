@@ -165,7 +165,7 @@ export default function AppNav() {
 
       {/* Footer */}
       <div className="px-5 py-3 border-t border-white/10">
-        <p className="text-white/30 text-xs">EMB Global · Series A</p>
+        <p className="text-white/30 text-xs">EMB Global</p>
       </div>
     </aside>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/utils/apiFetch";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 import { useState, useEffect, useCallback } from "react";
 import AutomationForm, { AutomationFormData, DEFAULT_FORM_DATA } from "@/components/AutomationForm";
@@ -462,8 +463,8 @@ export default function AutomationsPage() {
           {/* Left: Schedule list */}
           <div className="flex-1 min-w-0 space-y-4">
             {loading ? (
-              <div className="bg-white border border-brand-border rounded-xl px-6 py-8 text-center text-slate-400 text-sm shadow-sm">
-                Loading automations...
+              <div className="bg-white border border-brand-border rounded-xl shadow-sm">
+                <LoadingSpinner label="Loading automations..." />
               </div>
             ) : schedules.length === 0 ? (
               <div className="bg-white border border-brand-border rounded-xl px-6 py-12 text-center shadow-sm">
