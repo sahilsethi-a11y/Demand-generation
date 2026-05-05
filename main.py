@@ -26,8 +26,8 @@ logging.getLogger('fontTools.ttLib').setLevel(logging.WARNING)
 # Create logger instance
 logger = logging.getLogger(__name__)
 
-load_dotenv(Path("/etc/secrets/.env"), override=False)  # Render Secret File
-load_dotenv(override=False)  # local .env
+load_dotenv(override=False)          # local .env (dev)
+load_dotenv(Path("/etc/secrets/.env"), override=True)  # Render Secret File wins
 
 from backend.server.app import app
 
