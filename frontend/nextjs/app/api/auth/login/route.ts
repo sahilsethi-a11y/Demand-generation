@@ -18,8 +18,30 @@ export async function POST(request: NextRequest) {
     });
 
     const raw = await res.text();
-    const data = raw ? JSON.parse(raw) : {};
-    if (!res.ok) return NextResponse.json(data, { status: res.status });
+    const contentType = res.headers.get("content-type") || "";
+    const isJson = contentType.toLowerCase().includes("application/json");
+
+    let data: Record<string, any> = {};
+    if (raw) {
+      if (isJson) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = {};
+        }
+      } else {
+        data = { detail: raw.slice(0, 200) };
+      }
+    }
+
+    if (!res.ok) {
+      const detail =
+        data.detail ||
+        `Login failed (${res.status}). Backend at ${BACKEND} returned ${
+          isJson ? "invalid JSON" : "non-JSON response"
+        }.`;
+      return NextResponse.json({ ...data, detail }, { status: res.status });
+    }
 
     // Extract the JWT from the backend's Set-Cookie header
     const setCookieHeader = res.headers.get("set-cookie") ?? "";
