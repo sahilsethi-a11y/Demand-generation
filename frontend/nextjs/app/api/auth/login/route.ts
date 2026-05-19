@@ -1,21 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND =
+const RAW_BACKEND =
   process.env.BACKEND_URL ||
   process.env.NEXT_PUBLIC_BACKEND_URL ||
   process.env.NEXT_PUBLIC_GPTR_API_URL ||
   "http://localhost:8000";
 
+const BACKEND = RAW_BACKEND.replace(/\/+$/, "");
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    const target = `${BACKEND}/api/auth/login`;
 
-    const res = await fetch(`${BACKEND}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      cache: "no-store",
-    });
+    let res: Response | null = null;
+    let networkError: unknown = null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        res = await fetch(target, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          cache: "no-store",
+        });
+
+        if (!RETRYABLE_STATUSES.has(res.status) || attempt === MAX_ATTEMPTS) {
+          break;
+        }
+      } catch (err) {
+        networkError = err;
+        if (attempt === MAX_ATTEMPTS) {
+          throw err;
+        }
+      }
+
+      // Retry transient gateway/cold-start failures with small backoff.
+      await sleep(attempt * 400);
+    }
+
+    if (!res) {
+      throw networkError || new Error("No response from auth upstream");
+    }
 
     const raw = await res.text();
     const contentType = res.headers.get("content-type") || "";
@@ -40,7 +70,10 @@ export async function POST(request: NextRequest) {
         `Login failed (${res.status}). Backend at ${BACKEND} returned ${
           isJson ? "invalid JSON" : "non-JSON response"
         }.`;
-      return NextResponse.json({ ...data, detail }, { status: res.status });
+      return NextResponse.json(
+        { ...data, detail, upstream: BACKEND, status: res.status },
+        { status: res.status }
+      );
     }
 
     // Extract the JWT from the backend's Set-Cookie header
@@ -66,6 +99,7 @@ export async function POST(request: NextRequest) {
         detail:
           error?.message ||
           "Login proxy could not reach backend. Verify BACKEND_URL or NEXT_PUBLIC_GPTR_API_URL.",
+        upstream: BACKEND,
       },
       { status: 502 }
     );
