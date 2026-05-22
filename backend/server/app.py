@@ -224,6 +224,7 @@ async def _schedule_poller() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    app.state.is_ready = False
     os.makedirs("outputs", exist_ok=True)
     company_store.init_db()
     job_store.init_db()
@@ -248,9 +249,11 @@ async def lifespan(app: FastAPI):
     # Start automation schedule poller + periodic Turso sync
     poller_task = asyncio.create_task(_schedule_poller())
     sync_task = asyncio.create_task(_turso_sync_poller())
+    app.state.is_ready = True
     logger.info("GPT Researcher API ready - local mode with job persistence")
     yield
     # Shutdown
+    app.state.is_ready = False
     poller_task.cancel()
     sync_task.cancel()
     logger.info("Research API shutting down")
@@ -667,6 +670,14 @@ def _run_apollo_company_enrichment(
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready(request: Request):
+    is_ready = bool(getattr(request.app.state, "is_ready", False))
+    if not is_ready:
+        return JSONResponse({"status": "starting"}, status_code=503)
+    return {"status": "ready"}
 
 
 @app.get("/api/runs")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -9,11 +9,44 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "ready" | "starting" | "unreachable">("checking");
   const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkReady = async () => {
+      try {
+        const res = await fetch("/api/auth/ready", { cache: "no-store" });
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.ready) {
+          setBackendStatus("ready");
+        } else if (data?.status === "starting") {
+          setBackendStatus("starting");
+        } else {
+          setBackendStatus("unreachable");
+        }
+      } catch {
+        if (!cancelled) setBackendStatus("unreachable");
+      }
+    };
+
+    checkReady();
+    const timer = setInterval(checkReady, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    if (backendStatus !== "ready") {
+      setError("Backend is not ready yet. Please wait a few seconds and retry.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
@@ -58,6 +91,24 @@ export default function LoginPage() {
 
         <h1 className="text-white font-semibold text-xl mb-1">Sign in</h1>
         <p className="text-white/40 text-sm mb-6">Enter your credentials to continue</p>
+        <p
+          className={`text-xs mb-4 rounded-lg px-3 py-2 border ${
+            backendStatus === "ready"
+              ? "text-emerald-300 bg-emerald-400/10 border-emerald-400/20"
+              : backendStatus === "starting" || backendStatus === "checking"
+              ? "text-amber-300 bg-amber-400/10 border-amber-400/20"
+              : "text-red-300 bg-red-400/10 border-red-400/20"
+          }`}
+        >
+          Backend status:{" "}
+          {backendStatus === "ready"
+            ? "Ready"
+            : backendStatus === "starting"
+            ? "Starting up"
+            : backendStatus === "checking"
+            ? "Checking"
+            : "Unreachable"}
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -109,7 +160,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || backendStatus !== "ready"}
             className="w-full bg-brand-primary hover:bg-brand-primary/90 disabled:opacity-50 text-white font-medium text-sm rounded-lg py-2.5 transition-colors"
           >
             {loading ? "Signing in…" : "Sign in"}

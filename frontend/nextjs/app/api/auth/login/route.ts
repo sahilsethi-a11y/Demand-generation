@@ -8,9 +8,22 @@ const RAW_BACKEND =
 
 const BACKEND = RAW_BACKEND.replace(/\/+$/, "");
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 7;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const getBackoffMs = (attempt: number) => Math.min(6000, 700 * 2 ** (attempt - 1));
+
+async function checkBackendReady() {
+  try {
+    const res = await fetch(`${BACKEND}/ready`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,6 +34,23 @@ export async function POST(request: NextRequest) {
     let networkError: unknown = null;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const ready = await checkBackendReady();
+      if (!ready) {
+        if (attempt === MAX_ATTEMPTS) {
+          return NextResponse.json(
+            {
+              detail:
+                "Backend is waking up and not ready yet. Please retry in a few seconds.",
+              upstream: BACKEND,
+              status: 503,
+            },
+            { status: 503 }
+          );
+        }
+        await sleep(getBackoffMs(attempt));
+        continue;
+      }
+
       try {
         res = await fetch(target, {
           method: "POST",
@@ -39,8 +69,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Retry transient gateway/cold-start failures with small backoff.
-      await sleep(attempt * 400);
+      // Retry transient gateway/cold-start failures with stronger backoff.
+      await sleep(getBackoffMs(attempt));
     }
 
     if (!res) {
