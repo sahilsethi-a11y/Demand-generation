@@ -51,7 +51,7 @@ from apollo_leads import (
     normalize_company_person,
 )
 from email_generation import generate_job_outreach
-from instantly_service import send_leads_to_instantly, get_campaign_analytics, get_campaign_sending_status
+from instantly_service import send_leads_to_instantly, get_campaign_analytics, get_campaign_sending_status, get_leads_status
 from gpt_researcher.config import Config
 from server.job_store import JobStore
 from server.report_store import ReportStore
@@ -573,6 +573,7 @@ def _run_apollo_company_enrichment(
                 role=company_role,
                 titles=titles,
                 include_debug=True,
+                openai_api_key=os.getenv("OPENAI_API_KEY") or None,
             )
             if isinstance(result, dict):
                 debug_payload = result.get("debug")
@@ -1815,6 +1816,7 @@ def _run_pipeline(
                         titles=titles,
                         include_debug=False,
                         max_contacts=max_icps,
+                        openai_api_key=openai_api_key or None,
                     )
                     contacts = result.get("contacts") if isinstance(result, dict) else []
                     job_store.upsert_company_contacts(
@@ -2054,21 +2056,29 @@ def _run_pipeline(
                 )
                 result["_icp"] = icp
                 outreach_results.append(result)
-                # Persist to DB so Jobs page can show emails
+                # Persist to DB — save both legacy fields and new multi-month sequence fields
                 email_data = result.get("email") or {}
-                subjects = email_data.get("subject_options") or []
+                months = email_data.get("months") or []
+                instantly_payload = result.get("instantly_payload") or {}
                 job_store.upsert_outreach_email(
                     company_key=company_key,
                     contact_email=icp.get("email"),
                     apollo_person_id=icp.get("apollo_person_id"),
                     contact_name=icp.get("name"),
                     contact_title=icp.get("title"),
-                    subject_1=subjects[0] if subjects else None,
-                    subject_2=subjects[1] if len(subjects) > 1 else None,
-                    body=email_data.get("full_email_text"),
+                    subject_1=instantly_payload.get("subject_m1"),
+                    subject_2=instantly_payload.get("subject_m2"),
+                    body=months[0].get("body") if months else None,
                     qa_status=(result.get("qa") or {}).get("qa_status"),
                     approved=bool((result.get("qa") or {}).get("approved_for_export")),
                     pipeline_run_id=run_id,
+                    subject_m1=instantly_payload.get("subject_m1"),
+                    body_m1=instantly_payload.get("body_m1"),
+                    subject_m2=instantly_payload.get("subject_m2"),
+                    body_m2=instantly_payload.get("body_m2"),
+                    subject_m3=instantly_payload.get("subject_m3"),
+                    body_m3=instantly_payload.get("body_m3"),
+                    sequence=instantly_payload.get("sequence"),
                 )
                 _pipeline_stage_event(
                     run_id, "email_generation", "in_progress",
@@ -2120,7 +2130,6 @@ def _run_pipeline(
                 ]
                 send_result = send_leads_to_instantly(
                     leads_to_send, campaign_id, instantly_api_key,
-                    sender_name=os.getenv("INSTANTLY_SENDER_NAME", "EMB Global"),
                 )
                 if send_result.get("status") == "sent":
                     _pipeline_stage_event(
@@ -2748,7 +2757,6 @@ async def test_instantly_send(request: TestInstantlySendRequest):
 
     result = await send_leads_to_instantly(
         request.leads, campaign_id, api_key,
-        sender_name=os.getenv("INSTANTLY_SENDER_NAME", "EMB Global"),
     )
     return result
 
@@ -2774,3 +2782,119 @@ async def instantly_analytics():
         "analytics": analytics,
         "sending_status": sending_status,
     }
+
+
+class InstantlySendRequest(BaseModel):
+    overwrite: bool = False  # when True, updates existing leads in Instantly instead of skipping them
+
+
+@app.post("/api/companies/{company_key}/instantly-send")
+async def send_company_to_instantly(company_key: str, body: InstantlySendRequest = InstantlySendRequest()):
+    """Send approved outreach emails for a company to Instantly.
+
+    If stored emails are in the old single-email format (missing subject_m1),
+    regenerates them using the current 3-month sequence format before sending.
+    overwrite=True (Resend) updates existing leads in Instantly with new content.
+    """
+    instantly_api_key = os.getenv("INSTANTLY_API_KEY", "")
+    campaign_id = os.getenv("INSTANTLY_CAMPAIGN_ID", "")
+    openai_api_key = os.getenv("OPENAI_API_KEY", "")
+    if not instantly_api_key or not campaign_id:
+        raise HTTPException(status_code=400, detail="Instantly not configured")
+
+    emails = job_store.get_outreach_emails_for_company(company_key)
+    approved = [e for e in emails if e.get("approved")]
+    if not approved:
+        raise HTTPException(status_code=404, detail="No approved emails for this company")
+
+    # Detect old-format emails (missing subject_m1 means single-email legacy format)
+    needs_regen = any(not e.get("subject_m1") for e in approved)
+
+    if needs_regen and openai_api_key:
+        # Get a representative job for this company to use as context
+        company_jobs = job_store.get_jobs_for_company(company_key, limit=1)
+        example_job = company_jobs[0] if company_jobs else {}
+        # Regenerate emails for each approved contact using the new 3-month format
+        for e in approved:
+            contact = {
+                "name": e.get("contact_name") or "",
+                "email": e.get("contact_email") or "",
+                "title": e.get("contact_title") or "",
+                "apollo_person_id": e.get("apollo_person_id"),
+            }
+            regen = await asyncio.to_thread(
+                generate_job_outreach, example_job, contact, openai_api_key
+            )
+            payload = regen.get("instantly_payload") or {}
+            email_data = regen.get("email") or {}
+            months = email_data.get("months") or []
+            if payload.get("subject_m1"):
+                job_store.upsert_outreach_email(
+                    company_key=company_key,
+                    contact_email=e.get("contact_email"),
+                    apollo_person_id=e.get("apollo_person_id"),
+                    contact_name=e.get("contact_name"),
+                    contact_title=e.get("contact_title"),
+                    subject_1=payload.get("subject_m1"),
+                    subject_2=payload.get("subject_m2"),
+                    body=months[0].get("body") if months else None,
+                    qa_status=(regen.get("qa") or {}).get("qa_status"),
+                    approved=bool((regen.get("qa") or {}).get("approved_for_export")),
+                    pipeline_run_id=e.get("pipeline_run_id"),
+                    subject_m1=payload.get("subject_m1"),
+                    body_m1=payload.get("body_m1"),
+                    subject_m2=payload.get("subject_m2"),
+                    body_m2=payload.get("body_m2"),
+                    subject_m3=payload.get("subject_m3"),
+                    body_m3=payload.get("body_m3"),
+                    sequence=payload.get("sequence"),
+                )
+        # Reload after regeneration
+        emails = job_store.get_outreach_emails_for_company(company_key)
+        approved = [e for e in emails if e.get("approved")]
+
+    # Build Instantly lead payloads using the new multi-month fields
+    leads = []
+    for e in approved:
+        name_parts = (e.get("contact_name") or "").split()
+        leads.append({
+            "to_email": e.get("contact_email") or "",
+            "first_name": name_parts[0] if name_parts else "",
+            "last_name": " ".join(name_parts[1:]) if len(name_parts) > 1 else "",
+            "company_name": company_key,
+            "contact_title": e.get("contact_title") or "",
+            "subject_m1": e.get("subject_m1") or e.get("subject_1") or "",
+            "body_m1":    e.get("body_m1") or e.get("body") or "",
+            "subject_m2": e.get("subject_m2") or "",
+            "body_m2":    e.get("body_m2") or "",
+            "subject_m3": e.get("subject_m3") or "",
+            "body_m3":    e.get("body_m3") or "",
+            "sequence":   e.get("sequence") or "A",
+        })
+
+    # overwrite=True when: user explicitly resent, OR we just regenerated content (so Instantly
+    # must update existing leads rather than skip them with the old empty custom variables)
+    should_overwrite = body.overwrite or needs_regen
+    result = await asyncio.to_thread(
+        send_leads_to_instantly, leads, campaign_id, instantly_api_key, should_overwrite
+    )
+
+    if result.get("status") in ("sent", "ok"):
+        job_store.mark_instantly_sent(company_key, len(leads))
+
+    return {**result, "regenerated": needs_regen}
+
+
+@app.get("/api/companies/{company_key}/instantly-status")
+async def get_company_instantly_status(company_key: str):
+    """Get Instantly lead statuses for all contacts of a company."""
+    instantly_api_key = os.getenv("INSTANTLY_API_KEY", "")
+    campaign_id = os.getenv("INSTANTLY_CAMPAIGN_ID", "")
+    if not instantly_api_key or not campaign_id:
+        raise HTTPException(status_code=400, detail="Instantly not configured")
+
+    emails_data = job_store.get_outreach_emails_for_company(company_key)
+    emails = [e["contact_email"] for e in emails_data if e.get("contact_email")]
+
+    statuses = await asyncio.to_thread(get_leads_status, emails, campaign_id, instantly_api_key)
+    return {"company_key": company_key, "leads": statuses}

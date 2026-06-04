@@ -3,16 +3,75 @@
 import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "@/utils/apiFetch";
 
+// ── Role options ─────────────────────────────────────────────────────────────
+const ROLE_OPTIONS = [
+  "Software Engineer",
+  "Senior Software Engineer",
+  "Backend Engineer",
+  "Senior Backend Engineer",
+  "Frontend Engineer",
+  "Senior Frontend Engineer",
+  "Full Stack Engineer",
+  "DevOps Engineer",
+  "Site Reliability Engineer (SRE)",
+  "Data Engineer",
+  "Machine Learning Engineer",
+  "Cloud Engineer",
+  "Mobile Engineer",
+  "iOS Engineer",
+  "Android Engineer",
+  "Engineering Manager",
+  "Technical Lead",
+  "Head of Engineering",
+  "Product Manager",
+  "QA Engineer",
+];
+
+// ── Location options per market ───────────────────────────────────────────────
+const US_LOCATIONS = [
+  "United States",
+  "New York, NY",
+  "San Francisco, CA",
+  "Los Angeles, CA",
+  "Chicago, IL",
+  "Seattle, WA",
+  "Austin, TX",
+  "Boston, MA",
+  "Denver, CO",
+  "Atlanta, GA",
+  "Miami, FL",
+  "Dallas, TX",
+  "Washington, DC",
+  "San Jose, CA",
+  "Portland, OR",
+  "Remote",
+];
+
+const INDIA_LOCATIONS = [
+  "India",
+  "Bangalore",
+  "Mumbai",
+  "Delhi",
+  "Hyderabad",
+  "Pune",
+  "Chennai",
+  "Kolkata",
+  "Noida",
+  "Gurgaon",
+  "Ahmedabad",
+  "Remote",
+];
+
 // ── Cost reference data ─────────────────────────────────────────────────────
 const ACTOR_COSTS = {
   us: {
-    greenhouse: { label: "Greenhouse", costPer1k: 1.2, baseTip: "$1.20 / 1K jobs" },
-    ashby: { label: "Ashby", costPer1k: 2.0, baseTip: "$2.00 / 1K jobs" },
-    lever: { label: "Lever", costPer1k: 0.1, baseTip: "$0.10 / 1K jobs" },
+    greenhouse: { label: "Greenhouse", costPer1k: 1.2, baseTip: "$1.20 / 1K jobs", minJobs: "min 200/run", jobTypeNote: "post-fetch filter" },
+    ashby:      { label: "Ashby",      costPer1k: 2.0, baseTip: "$2.00 / 1K jobs", minJobs: "min 200/run", jobTypeNote: "post-fetch filter" },
+    lever:      { label: "Lever",      costPer1k: 0.1, baseTip: "$0.10 / 1K jobs", minJobs: "max 100/run", jobTypeNote: "post-fetch filter" },
   },
   india: {
-    linkedin: { label: "LinkedIn", costPer1k: null, flatNote: "$29.99/mo + CU usage", baseTip: "Flat $29.99/mo subscription + Apify compute units (~$0.025/run). Rental model retires Oct 2026." },
-    naukri: { label: "Naukri", costPer1k: 5.0, baseTip: "$5.00 / 1K jobs" },
+    linkedin: { label: "LinkedIn", costPer1k: null, flatNote: "$29.99/mo + CU usage", baseTip: "Flat $29.99/mo subscription + Apify compute units (~$0.025/run). Rental model retires Oct 2026.", minJobs: "up to 1,000/run", jobTypeNote: "API filter (full-time, part-time, contract, internship) · remote/hybrid post-fetch" },
+    naukri:   { label: "Naukri",   costPer1k: 5.0,  baseTip: "$5.00 / 1K jobs", minJobs: "min 50/run",   jobTypeNote: "post-fetch filter" },
   },
 } as const;
 
@@ -82,6 +141,8 @@ export default function PipelinePage() {
   const [maxCompanies, setMaxCompanies] = useState(100);
   const [autoSend, setAutoSend] = useState(false);
   const [testMode, setTestMode] = useState(false);
+  const [customRole, setCustomRole] = useState("");
+  const [moreRunsPrompt, setMoreRunsPrompt] = useState<{ emailsGenerated: number } | null>(null);
 
   const [running, setRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
@@ -140,14 +201,15 @@ export default function PipelinePage() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
-  // Update sources when market changes
+  // Update sources and reset location when market changes
   useEffect(() => {
     if (market === "us") {
       setSelectedSources(["greenhouse", "ashby", "lever"]);
-      setLocation((loc) => (loc === "India" ? "" : loc));
     } else {
       setSelectedSources(["linkedin", "naukri"]);
     }
+    setLocation("");
+    setMoreRunsPrompt(null);
   }, [market]);
 
   // Scroll logs to bottom
@@ -193,8 +255,11 @@ export default function PipelinePage() {
     return { variable: total.toFixed(2), apollo: apolloCost, hasFlat };
   }
 
+  const resolvedRole = role === "__custom__" ? customRole.trim() : role.trim();
+
   async function startPipeline() {
-    if (!role.trim() || !location.trim()) return;
+    if (!resolvedRole || !location.trim()) return;
+    setMoreRunsPrompt(null);
     setRunning(true);
     setRunId(null);
     setStages({});
@@ -210,7 +275,7 @@ export default function PipelinePage() {
     const res = await apiFetch("/api/pipeline/run", {
       method: "POST",
       body: JSON.stringify({
-        role: role.trim(),
+        role: resolvedRole,
         location: location.trim(),
         date_filter: dateFilter,
         job_type: jobType,
@@ -281,6 +346,13 @@ export default function PipelinePage() {
         setRunning(false);
         sessionStorage.removeItem("pipeline_run_id");
         if (pollRef.current) clearInterval(pollRef.current);
+        // For India market: prompt user before running another batch instead of auto top-up
+        if (market === "india" && status.status === "completed") {
+          const emailCount = (status.outreach_results || []).length;
+          if (emailCount < TARGET_EMAILS) {
+            setMoreRunsPrompt({ emailsGenerated: emailCount });
+          }
+        }
       }
     }
 
@@ -361,23 +433,39 @@ export default function PipelinePage() {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Role / Job Title</label>
-                  <input
-                    type="text"
+                  <select
                     value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    placeholder="e.g. Software Engineer"
-                    className="w-full px-3 py-2.5 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary"
-                  />
+                    onChange={(e) => { setRole(e.target.value); if (e.target.value !== "__custom__") setCustomRole(""); }}
+                    className="w-full px-3 py-2.5 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary bg-white"
+                  >
+                    <option value="">Select a role…</option>
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>{r}</option>
+                    ))}
+                    <option value="__custom__">Other (type below)</option>
+                  </select>
+                  {role === "__custom__" && (
+                    <input
+                      type="text"
+                      value={customRole}
+                      onChange={(e) => setCustomRole(e.target.value)}
+                      placeholder="Enter custom role…"
+                      className="w-full mt-2 px-3 py-2.5 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Location</label>
-                  <input
-                    type="text"
+                  <select
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
-                    placeholder={market === "us" ? "e.g. San Francisco" : "e.g. Bangalore"}
-                    className="w-full px-3 py-2.5 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary"
-                  />
+                    className="w-full px-3 py-2.5 border border-brand-border rounded-lg text-sm focus:outline-none focus:border-brand-primary focus:ring-1 focus:ring-brand-primary bg-white"
+                  >
+                    <option value="">Select a location…</option>
+                    {(market === "us" ? US_LOCATIONS : INDIA_LOCATIONS).map((l) => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -419,24 +507,33 @@ export default function PipelinePage() {
                   const actorLabel = market === "india"
                     ? `~${actorJobs} jobs (initial)`
                     : `~${actorJobs.toLocaleString()} jobs`;
+                  const infoTyped = info as typeof info & { minJobs: string; jobTypeNote: string };
                   return (
-                    <label key={key} className="flex items-center gap-3 cursor-pointer group">
+                    <label key={key} className="flex items-start gap-3 cursor-pointer group">
                       <input
                         type="checkbox"
                         checked={selectedSources.includes(key)}
                         onChange={() => toggleSource(key)}
-                        className="w-4 h-4 rounded border-slate-300 text-brand-primary focus:ring-brand-primary"
+                        className="w-4 h-4 mt-0.5 rounded border-slate-300 text-brand-primary focus:ring-brand-primary flex-shrink-0"
                       />
-                      <span className="flex-1 text-sm font-medium text-slate-700 group-hover:text-brand-primary transition-colors">
-                        {info.label}
-                      </span>
-                      <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 font-medium">
-                        {actorLabel}
-                      </span>
-                      <span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                        {info.costPer1k != null ? `$${info.costPer1k}/1K` : (info as any).flatNote}
-                      </span>
-                      <span className="text-xs text-slate-400" title={info.baseTip}>ⓘ</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-slate-700 group-hover:text-brand-primary transition-colors">
+                            {info.label}
+                          </span>
+                          <span className="text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-medium">
+                            {infoTyped.minJobs}
+                          </span>
+                          <span className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 font-medium">
+                            {actorLabel}
+                          </span>
+                          <span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                            {info.costPer1k != null ? `$${info.costPer1k}/1K` : (info as any).flatNote}
+                          </span>
+                          <span className="text-xs text-slate-400" title={info.baseTip}>ⓘ</span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-slate-400">{infoTyped.jobTypeNote}</p>
+                      </div>
                     </label>
                   );
                 })}
@@ -545,7 +642,7 @@ export default function PipelinePage() {
                 </div>
                 <button
                   onClick={startPipeline}
-                  disabled={!role.trim() || !location.trim() || selectedSources.length === 0}
+                  disabled={!resolvedRole || !location.trim() || selectedSources.length === 0}
                   className="flex items-center gap-2 px-6 py-2.5 bg-brand-primary text-white rounded-lg text-sm font-semibold hover:bg-blue-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -565,7 +662,7 @@ export default function PipelinePage() {
             <div className="bg-white border border-brand-border rounded-xl px-6 py-4 flex items-center justify-between shadow-sm">
               <div>
                 <h2 className="text-sm font-semibold text-brand-secondary flex items-center gap-2">
-                  Pipeline Run · {role} · {location} · {market.toUpperCase()}
+                  Pipeline Run · {resolvedRole} · {location} · {market.toUpperCase()}
                   {testMode && (
                     <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-600 leading-none">
                       TEST
@@ -595,6 +692,34 @@ export default function PipelinePage() {
                 )}
               </div>
             </div>
+
+            {/* More runs prompt — India market only, shown when emails < target */}
+            {moreRunsPrompt && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-6 py-4 flex items-center justify-between shadow-sm">
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">
+                    {moreRunsPrompt.emailsGenerated} of {TARGET_EMAILS} emails generated
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    This run is short of the daily target. Would you like to run another batch to top up?
+                  </p>
+                </div>
+                <div className="flex gap-2 ml-4 flex-shrink-0">
+                  <button
+                    onClick={() => { setMoreRunsPrompt(null); startPipeline(); }}
+                    className="px-4 py-2 text-sm font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 transition-colors"
+                  >
+                    Yes, run another batch
+                  </button>
+                  <button
+                    onClick={() => setMoreRunsPrompt(null)}
+                    className="px-4 py-2 text-sm font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors"
+                  >
+                    No, I&apos;m done
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Tab switcher */}
             <div className="flex gap-1 bg-white border border-brand-border rounded-xl p-1 shadow-sm">

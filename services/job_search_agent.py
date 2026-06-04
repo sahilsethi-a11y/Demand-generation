@@ -163,10 +163,17 @@ class JobSearchFilters:
 
     @property
     def linkedin_job_type(self) -> str | None:
-        """Map job_type to LinkedIn actor's contractType parameter value."""
+        """Map job_type to LinkedIn actor's contractType parameter value.
+
+        LinkedIn contractType codes: F=Full-time, P=Part-time, C=Contract,
+        T=Temporary, I=Internship. Remote/hybrid/onsite are work-arrangement
+        filters (not contractType) so they fall through to post-fetch filtering.
+        """
         mapping = {
             "full_time": "F",
+            "part_time": "P",
             "contract": "C",
+            "internship": "I",
         }
         return mapping.get(self.job_type)
 

@@ -1,9 +1,20 @@
+import json
+import logging
 import math
+import re
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
+
+logger = logging.getLogger(__name__)
+
+OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+ICP_RERANK_MODEL = "gpt-4.1-mini"
+# Number of rule-filtered candidates passed to the LLM for re-ranking.
+# Must be > final limit so the LLM has real choices to make.
+LLM_CANDIDATE_POOL = 8
 
 PEOPLE_SEARCH_ENDPOINT = "https://api.apollo.io/v1/mixed_people/api_search"
 BULK_ENRICH_ENDPOINT = "https://api.apollo.io/api/v1/people/bulk_match"
@@ -806,6 +817,115 @@ def shortlist_company_contacts(
     return qualified[:limit]
 
 
+def llm_rerank_icps(
+    candidates: List[Dict[str, Optional[str]]],
+    role: str,
+    company_name: str,
+    openai_api_key: str,
+    final_limit: int = 3,
+) -> List[Tuple[int, str]]:
+    """Re-rank rule-filtered ICP candidates using an LLM.
+
+    Returns a list of (original_index, reason) tuples for the top final_limit picks.
+    The LLM enforces diversity (no 3 people from the same function) and prioritises:
+      1. The person who directly feels the pain of this role being open
+      2. The person who controls the hiring process / budget
+      3. A senior exec or second functional owner
+
+    Falls back to returning the first final_limit indices with generic reasons on any error.
+    """
+    if not candidates or not openai_api_key:
+        return [(i, "Rule-based selection.") for i in range(min(final_limit, len(candidates)))]
+
+    if len(candidates) <= final_limit:
+        return [(i, "Rule-based selection (pool smaller than limit).") for i in range(len(candidates))]
+
+    lines = []
+    for i, c in enumerate(candidates):
+        parts = [
+            f"{i}.",
+            c.get("name") or "Unknown",
+            "|",
+            c.get("title") or "Unknown title",
+            "|",
+            f"dept: {c.get('department') or '—'}",
+            "|",
+            f"seniority: {c.get('seniority') or '—'}",
+        ]
+        lines.append(" ".join(parts))
+    candidates_block = "\n".join(lines)
+
+    prompt = f"""You are selecting the {final_limit} best outreach contacts for a B2B sales campaign.
+
+CONTEXT:
+- Company: {company_name}
+- Role they are hiring for: {role}
+- We sell embtalent.ai — pre-vetted engineers with full technical assessments, helping companies close roles faster.
+
+CANDIDATES (index | name | title | dept | seniority):
+{candidates_block}
+
+SELECT THE BEST {final_limit} contacts using this priority order:
+1. The person who directly FEELS THE PAIN of this hire taking too long — typically the functional owner (VP/Head/Director of the relevant team). They are understaffed.
+2. The person who CONTROLS THE HIRING PROCESS — Head of Talent, Talent Acquisition, CHRO, VP People. They approve vendor selection.
+3. A SENIOR EXEC (CEO/CTO/COO) as a secondary approver, especially at companies under 200 people.
+
+DIVERSITY RULE: Do not select 3 people from the same function/department. Mix at least 2 different functions.
+
+Return valid JSON only, no markdown:
+{{
+  "selected": [
+    {{"index": <int>, "reason": "<one sentence: why this specific person for this specific role>"}},
+    {{"index": <int>, "reason": "<one sentence>"}},
+    {{"index": <int>, "reason": "<one sentence>"}}
+  ]
+}}"""
+
+    try:
+        resp = requests.post(
+            OPENAI_ENDPOINT,
+            headers={"Authorization": f"Bearer {openai_api_key}", "Content-Type": "application/json"},
+            json={
+                "model": ICP_RERANK_MODEL,
+                "temperature": 0.1,
+                "max_tokens": 400,
+                "messages": [
+                    {"role": "system", "content": "You select ICP contacts for outreach. Return valid JSON only, no markdown."},
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=20,
+        )
+        if not resp.ok:
+            logger.warning("LLM ICP rerank failed: HTTP %s", resp.status_code)
+            return [(i, "Rule-based selection (LLM unavailable).") for i in range(min(final_limit, len(candidates)))]
+
+        content = resp.json()["choices"][0]["message"]["content"].strip()
+        content = re.sub(r"^```(?:json)?\s*", "", content)
+        content = re.sub(r"\s*```$", "", content)
+        parsed = json.loads(content)
+
+        result: List[Tuple[int, str]] = []
+        seen_indices: set = set()
+        for item in parsed.get("selected") or []:
+            idx = item.get("index")
+            reason = (item.get("reason") or "").strip()
+            if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen_indices:
+                result.append((idx, reason))
+                seen_indices.add(idx)
+            if len(result) >= final_limit:
+                break
+
+        if result:
+            return result
+
+        logger.warning("LLM ICP rerank returned no valid indices — falling back to rule order.")
+    except Exception as exc:
+        logger.warning("LLM ICP rerank error: %s", exc)
+
+    return [(i, "Rule-based selection (LLM fallback).") for i in range(min(final_limit, len(candidates)))]
+
+
 def format_company_contacts(
     people: List[Dict[str, Optional[str]]],
     confidence: str,
@@ -835,30 +955,63 @@ def run_apollo_company_employee_enrichment(
     titles: Optional[List[str]] = None,
     include_debug: bool = False,
     max_contacts: int = DEFAULT_CONTACT_LIMIT,
+    openai_api_key: Optional[str] = None,
 ) -> Dict[str, object]:
-    # Use job-aware ICP titles when no explicit titles are provided
+    """Enrich a company with ICP contacts using a hybrid rule + LLM selection.
+
+    When openai_api_key is provided, the rule-based filter casts a wider net
+    (up to LLM_CANDIDATE_POOL candidates) and then an LLM picks the best
+    max_contacts from that shortlist, enforcing diversity and role relevance.
+    Without an API key, the rule-based ranking is used directly.
+    """
     search_titles = titles or get_icp_titles_for_role(role)
     confidence = "domain_match" if normalize_domain(domain or "") else "name_match"
 
     if include_debug:
         discovered_people, search_debug = search_people_for_company(
-            api_key=api_key,
-            domain=domain,
-            company_name=company_name,
-            titles=search_titles,
-            include_debug=True,
+            api_key=api_key, domain=domain, company_name=company_name,
+            titles=search_titles, include_debug=True,
         )
     else:
         discovered_people = search_people_for_company(
-            api_key=api_key,
-            domain=domain,
-            company_name=company_name,
-            titles=search_titles,
-            include_debug=False,
+            api_key=api_key, domain=domain, company_name=company_name,
+            titles=search_titles, include_debug=False,
         )
         search_debug = None
 
-    shortlisted_people = shortlist_company_contacts(discovered_people, role, limit=max_contacts)
+    # ── Rule-based pre-filter ─────────────────────────────────────────────────
+    # Cast a wider net when LLM is available so it has real choices to make.
+    pre_filter_limit = max(LLM_CANDIDATE_POOL, max_contacts) if openai_api_key else max_contacts
+    candidates_raw = shortlist_company_contacts(discovered_people, role, limit=pre_filter_limit)
+
+    # ── LLM re-ranking ────────────────────────────────────────────────────────
+    llm_reasons: Dict[str, str] = {}
+    llm_used = False
+
+    if openai_api_key and len(candidates_raw) > max_contacts:
+        candidates_formatted = format_people_for_icp(candidates_raw)
+        selections = llm_rerank_icps(
+            candidates_formatted,
+            role=role or "",
+            company_name=company_name or company_key,
+            openai_api_key=openai_api_key,
+            final_limit=max_contacts,
+        )
+        if selections:
+            llm_used = True
+            shortlisted_people = []
+            for idx, reason in selections:
+                if 0 <= idx < len(candidates_raw):
+                    shortlisted_people.append(candidates_raw[idx])
+                    # Key by Apollo ID for later reason injection
+                    pid = str(candidates_raw[idx].get("id") or idx)
+                    llm_reasons[pid] = reason
+        else:
+            shortlisted_people = candidates_raw[:max_contacts]
+    else:
+        shortlisted_people = candidates_raw[:max_contacts]
+
+    # ── Bulk email enrichment ─────────────────────────────────────────────────
     bulk_details = build_bulk_match_payload(shortlisted_people)
     if len(bulk_details) > max_contacts:
         bulk_details = bulk_details[:max_contacts]
@@ -879,23 +1032,29 @@ def run_apollo_company_employee_enrichment(
         if contact.get("email")
     ][:max_contacts]
 
+    # Inject LLM-generated reasons, overriding the generic rule-based strings.
+    if llm_used and llm_reasons:
+        for contact in formatted_contacts:
+            pid = str(contact.get("apollo_person_id") or "")
+            if pid in llm_reasons:
+                contact["icp_reason"] = llm_reasons[pid]
+                contact["llm_selected"] = True
+
     payload: Dict[str, object] = {
         "company_key": company_key,
         "company_domain": normalize_domain(domain or "") or None,
         "company_name": company_name,
         "match_strategy": confidence,
         "contacts": formatted_contacts,
-        "all_people": [normalize_company_person(person) for person in discovered_people] if isinstance(discovered_people, list) else [],
+        "all_people": [normalize_company_person(p) for p in discovered_people] if isinstance(discovered_people, list) else [],
         "search_titles": search_titles or [],
         "people_count": len(discovered_people) if isinstance(discovered_people, list) else 0,
         "shortlisted_count": len(shortlisted_people),
         "enriched_count": len(formatted_contacts),
+        "llm_used": llm_used,
     }
     if include_debug:
-        payload["debug"] = {
-            "people_search": search_debug,
-            "bulk_match": bulk_debug,
-        }
+        payload["debug"] = {"people_search": search_debug, "bulk_match": bulk_debug}
     return payload
 
 

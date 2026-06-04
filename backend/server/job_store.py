@@ -39,6 +39,37 @@ class JobStore:
             with conn as connection:
                 self._migrate_automation_tables(connection)
 
+        try:
+            conn.execute("SELECT 1 FROM instantly_sent_leads LIMIT 1")
+        except Exception:
+            with conn as connection:
+                connection.execute("""CREATE TABLE IF NOT EXISTS instantly_sent_leads (
+                    company_key TEXT PRIMARY KEY,
+                    lead_count INTEGER NOT NULL DEFAULT 0,
+                    sent_at INTEGER NOT NULL,
+                    resend_count INTEGER NOT NULL DEFAULT 0,
+                    last_resent_at INTEGER,
+                    updated_at INTEGER NOT NULL
+                )""")
+                connection.commit()
+
+        # Add multi-month email columns to outreach_emails if they don't exist yet.
+        try:
+            conn.execute("SELECT subject_m1 FROM outreach_emails LIMIT 1")
+        except Exception:
+            with conn as connection:
+                for col_def in [
+                    "subject_m1 TEXT", "body_m1 TEXT",
+                    "subject_m2 TEXT", "body_m2 TEXT",
+                    "subject_m3 TEXT", "body_m3 TEXT",
+                    "sequence TEXT",
+                ]:
+                    try:
+                        connection.execute(f"ALTER TABLE outreach_emails ADD COLUMN {col_def}")
+                    except Exception:
+                        pass
+                connection.commit()
+
         if _needs_schema:
             with conn as connection:
                 connection.execute(
@@ -356,11 +387,18 @@ class JobStore:
         qa_status: str | None,
         approved: bool,
         pipeline_run_id: str | None = None,
+        # New multi-month sequence fields
+        subject_m1: str | None = None,
+        body_m1: str | None = None,
+        subject_m2: str | None = None,
+        body_m2: str | None = None,
+        subject_m3: str | None = None,
+        body_m3: str | None = None,
+        sequence: str | None = None,
     ) -> None:
         self.init_db()
         now_ms = int(time.time() * 1000)
         normalized_company_key = (company_key or "").strip().lower()
-        # Prefer apollo_person_id as key, fall back to email
         email_key = f"{normalized_company_key}|{apollo_person_id or contact_email or contact_name or ''}".strip("|")
         with self._connect() as connection:
             connection.execute(
@@ -368,8 +406,10 @@ class JobStore:
                 INSERT INTO outreach_emails (
                     email_key, company_key, contact_email, apollo_person_id,
                     contact_name, contact_title, subject_1, subject_2, body,
-                    qa_status, approved, pipeline_run_id, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    qa_status, approved, pipeline_run_id,
+                    subject_m1, body_m1, subject_m2, body_m2, subject_m3, body_m3, sequence,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(email_key) DO UPDATE SET
                     subject_1 = excluded.subject_1,
                     subject_2 = excluded.subject_2,
@@ -377,6 +417,13 @@ class JobStore:
                     qa_status = excluded.qa_status,
                     approved = excluded.approved,
                     pipeline_run_id = excluded.pipeline_run_id,
+                    subject_m1 = excluded.subject_m1,
+                    body_m1 = excluded.body_m1,
+                    subject_m2 = excluded.subject_m2,
+                    body_m2 = excluded.body_m2,
+                    subject_m3 = excluded.subject_m3,
+                    body_m3 = excluded.body_m3,
+                    sequence = excluded.sequence,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -385,7 +432,12 @@ class JobStore:
                     contact_name or None, contact_title or None,
                     subject_1 or None, subject_2 or None, body or None,
                     qa_status or None, 1 if approved else 0,
-                    pipeline_run_id or None, now_ms, now_ms,
+                    pipeline_run_id or None,
+                    subject_m1 or None, body_m1 or None,
+                    subject_m2 or None, body_m2 or None,
+                    subject_m3 or None, body_m3 or None,
+                    sequence or None,
+                    now_ms, now_ms,
                 ),
             )
             connection.commit()
@@ -397,7 +449,9 @@ class JobStore:
             rows = connection.execute(
                 """
                 SELECT contact_name, contact_title, contact_email, apollo_person_id,
-                       subject_1, subject_2, body, qa_status, approved, pipeline_run_id, updated_at
+                       subject_1, subject_2, body, qa_status, approved, pipeline_run_id,
+                       subject_m1, body_m1, subject_m2, body_m2, subject_m3, body_m3, sequence,
+                       updated_at
                 FROM outreach_emails
                 WHERE company_key = ?
                 ORDER BY approved DESC, updated_at DESC
@@ -405,6 +459,28 @@ class JobStore:
                 (normalized,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_jobs_for_company(self, company_key: str, limit: int = 3) -> list[dict[str, Any]]:
+        """Return the most recent saved jobs for a company (used for email regeneration)."""
+        self.init_db()
+        normalized = (company_key or "").strip().lower()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM saved_jobs
+                WHERE company_key = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (normalized, limit),
+            ).fetchall()
+        jobs = []
+        for row in rows:
+            try:
+                jobs.append(json.loads(row["payload_json"]))
+            except Exception:
+                pass
+        return jobs
 
     def get_outreach_emails_for_run(self, pipeline_run_id: str) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -523,6 +599,40 @@ class JobStore:
             )
             connection.commit()
 
+    def mark_instantly_sent(self, company_key: str, lead_count: int) -> None:
+        """Record that leads for this company were sent to Instantly."""
+        self.init_db()
+        now_ms = int(time.time() * 1000)
+        normalized = self._clean_text(company_key)
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO instantly_sent_leads (company_key, lead_count, sent_at, resend_count, updated_at)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT(company_key) DO UPDATE SET
+                    lead_count = excluded.lead_count,
+                    last_resent_at = CASE WHEN instantly_sent_leads.sent_at IS NOT NULL THEN ? ELSE NULL END,
+                    resend_count = instantly_sent_leads.resend_count + CASE WHEN instantly_sent_leads.sent_at IS NOT NULL THEN 1 ELSE 0 END,
+                    updated_at = excluded.updated_at
+                """,
+                (normalized, lead_count, now_ms, now_ms, now_ms),
+            )
+            connection.commit()
+
+    def get_instantly_sent_map(self, company_keys: list[str]) -> dict[str, dict]:
+        """Return instantly_sent_leads rows for the given company keys."""
+        if not company_keys:
+            return {}
+        self.init_db()
+        unique = [k for k in dict.fromkeys(company_keys) if k]
+        placeholders = ", ".join("?" for _ in unique)
+        conn = self._connect()
+        rows = conn.execute(
+            f"SELECT company_key, lead_count, sent_at, resend_count, last_resent_at FROM instantly_sent_leads WHERE company_key IN ({placeholders})",
+            tuple(unique),
+        ).fetchall()
+        return {row["company_key"]: dict(row) for row in rows}
+
     def list_companies_for_enrichment(
         self,
         company_keys: list[str] | None = None,
@@ -609,7 +719,7 @@ class JobStore:
         if not jobs:
             return []
         company_keys = [self._company_key(job) for job in jobs if self._company_key(job)]
-        contacts_map, enrichment_map = self._load_company_metadata(company_keys)
+        contacts_map, enrichment_map, email_count_map, instantly_map = self._load_company_metadata(company_keys)
         annotated_jobs: list[dict[str, Any]] = []
         for job in jobs:
             company_key = self._company_key(job)
@@ -622,6 +732,19 @@ class JobStore:
             payload["contacts_count"] = len(contacts)
             payload["apollo_enrichment_status"] = enrichment.get("status")
             payload["apollo_enrichment_confidence"] = enrichment.get("confidence")
+            email_count = email_count_map.get(company_key, 0)
+            instantly_info = instantly_map.get(company_key)
+            payload["email_count"] = email_count
+            payload["instantly_sent_at"] = instantly_info["sent_at"] if instantly_info else None
+            payload["instantly_resend_count"] = instantly_info["resend_count"] if instantly_info else 0
+            if instantly_info:
+                payload["outreach_status"] = "sent"
+            elif email_count > 0:
+                payload["outreach_status"] = "emails_ready"
+            elif len(contacts) > 0:
+                payload["outreach_status"] = "leads"
+            else:
+                payload["outreach_status"] = "new"
             annotated_jobs.append(payload)
         return annotated_jobs
 
@@ -697,7 +820,7 @@ class JobStore:
         ).fetchall()
 
         company_keys = [row["company_key"] for row in rows if row["company_key"]]
-        contacts_map, enrichment_map = self._load_company_metadata(company_keys)
+        contacts_map, enrichment_map, email_count_map, instantly_map = self._load_company_metadata(company_keys)
         jobs: list[dict[str, Any]] = []
         for row in rows:
             payload = json.loads(row["payload_json"])
@@ -713,6 +836,19 @@ class JobStore:
             payload["contacts_count"] = len(contacts)
             payload["apollo_enrichment_status"] = enrichment.get("status")
             payload["apollo_enrichment_confidence"] = enrichment.get("confidence")
+            email_count = email_count_map.get(row["company_key"], 0)
+            instantly_info = instantly_map.get(row["company_key"])
+            payload["email_count"] = email_count
+            payload["instantly_sent_at"] = instantly_info["sent_at"] if instantly_info else None
+            payload["instantly_resend_count"] = instantly_info["resend_count"] if instantly_info else 0
+            if instantly_info:
+                payload["outreach_status"] = "sent"
+            elif email_count > 0:
+                payload["outreach_status"] = "emails_ready"
+            elif len(contacts) > 0:
+                payload["outreach_status"] = "leads"
+            else:
+                payload["outreach_status"] = "new"
             jobs.append(payload)
 
         total = int(total_row["count"]) if total_row else 0
@@ -863,10 +999,10 @@ class JobStore:
     def _load_company_metadata(
         self,
         company_keys: list[str],
-    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
+    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]], dict[str, int], dict[str, dict[str, Any]]]:
         unique_company_keys = [key for key in dict.fromkeys(company_keys) if key]
         if not unique_company_keys:
-            return {}, {}
+            return {}, {}, {}, {}
         placeholders = ", ".join("?" for _ in unique_company_keys)
         conn = self._connect()
         contact_rows = conn.execute(
@@ -899,6 +1035,25 @@ class JobStore:
             tuple(unique_company_keys),
         ).fetchall()
 
+        email_count_rows = conn.execute(
+            f"""
+            SELECT company_key, COUNT(*) as email_count
+            FROM outreach_emails
+            WHERE company_key IN ({placeholders}) AND approved = 1
+            GROUP BY company_key
+            """,
+            tuple(unique_company_keys),
+        ).fetchall()
+
+        instantly_rows = conn.execute(
+            f"""
+            SELECT company_key, lead_count, sent_at, resend_count, last_resent_at
+            FROM instantly_sent_leads
+            WHERE company_key IN ({placeholders})
+            """,
+            tuple(unique_company_keys),
+        ).fetchall()
+
         contacts_map: dict[str, list[dict[str, Any]]] = {key: [] for key in unique_company_keys}
         for row in contact_rows:
             contacts_map.setdefault(row["company_key"], []).append(
@@ -917,7 +1072,16 @@ class JobStore:
         enrichment_map: dict[str, dict[str, Any]] = {}
         for row in enrichment_rows:
             enrichment_map[row["company_key"]] = dict(row)
-        return contacts_map, enrichment_map
+
+        email_count_map: dict[str, int] = {}
+        for row in email_count_rows:
+            email_count_map[row["company_key"]] = int(row["email_count"])
+
+        instantly_map: dict[str, dict[str, Any]] = {}
+        for row in instantly_rows:
+            instantly_map[row["company_key"]] = dict(row)
+
+        return contacts_map, enrichment_map, email_count_map, instantly_map
 
     @staticmethod
     def _job_key(job: dict[str, Any]) -> str:
@@ -1050,6 +1214,20 @@ class JobStore:
                 connection.execute("ALTER TABLE automation_run_history ADD COLUMN triggered_by_email TEXT")
         except Exception:
             pass
+
+        # Add instantly_sent_leads table
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS instantly_sent_leads (
+                company_key TEXT PRIMARY KEY,
+                lead_count INTEGER NOT NULL DEFAULT 0,
+                sent_at INTEGER NOT NULL,
+                resend_count INTEGER NOT NULL DEFAULT 0,
+                last_resent_at INTEGER,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
 
         # Index for fast per-run email lookups (table may not exist yet on first boot)
         try:
