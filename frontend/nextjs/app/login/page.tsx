@@ -10,6 +10,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [backendStatus, setBackendStatus] = useState<"checking" | "ready" | "starting" | "unreachable">("checking");
+  const [startupWarning, setStartupWarning] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export default function LoginPage() {
         if (cancelled) return;
         if (data?.ready) {
           setBackendStatus("ready");
+          setStartupWarning(data?.warning || null);
         } else if (data?.status === "starting") {
           setBackendStatus("starting");
         } else {
@@ -93,16 +95,20 @@ export default function LoginPage() {
         <p className="text-white/40 text-sm mb-6">Enter your credentials to continue</p>
         <p
           className={`text-xs mb-4 rounded-lg px-3 py-2 border ${
-            backendStatus === "ready"
+            backendStatus === "ready" && !startupWarning
               ? "text-emerald-300 bg-emerald-400/10 border-emerald-400/20"
+              : backendStatus === "ready" && startupWarning
+              ? "text-amber-300 bg-amber-400/10 border-amber-400/20"
               : backendStatus === "starting" || backendStatus === "checking"
               ? "text-amber-300 bg-amber-400/10 border-amber-400/20"
               : "text-red-300 bg-red-400/10 border-red-400/20"
           }`}
         >
           Backend status:{" "}
-          {backendStatus === "ready"
+          {backendStatus === "ready" && !startupWarning
             ? "Ready"
+            : backendStatus === "ready" && startupWarning
+            ? `Ready (init warning: ${startupWarning})`
             : backendStatus === "starting"
             ? "Starting up"
             : backendStatus === "checking"

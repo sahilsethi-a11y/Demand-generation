@@ -225,26 +225,42 @@ async def _schedule_poller() -> None:
 async def lifespan(app: FastAPI):
     # Startup
     app.state.is_ready = False
-    os.makedirs("outputs", exist_ok=True)
-    company_store.init_db()
-    job_store.init_db()
-    user_store.init_db()
-    set_user_store(user_store)
-    app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
+    app.state.startup_error = None
 
-    # Mount frontend static files
-    frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend")
-    if os.path.exists(frontend_path):
-        app.mount("/site", StaticFiles(directory=frontend_path), name="frontend")
-        logger.debug(f"Frontend mounted from: {frontend_path}")
+    try:
+        os.makedirs("outputs", exist_ok=True)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, company_store.init_db)
+        await loop.run_in_executor(None, job_store.init_db)
+        await loop.run_in_executor(None, user_store.init_db)
+        set_user_store(user_store)
+        app.mount("/outputs", StaticFiles(directory="outputs"), name="outputs")
 
-        # Also mount the static directory directly for assets referenced as /static/
-        static_path = os.path.join(frontend_path, "static")
-        if os.path.exists(static_path):
-            app.mount("/static", StaticFiles(directory=static_path), name="static")
-            logger.debug(f"Static assets mounted from: {static_path}")
-    else:
-        logger.warning(f"Frontend directory not found: {frontend_path}")
+        # Mount frontend static files
+        frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend")
+        if os.path.exists(frontend_path):
+            app.mount("/site", StaticFiles(directory=frontend_path), name="frontend")
+            logger.debug(f"Frontend mounted from: {frontend_path}")
+
+            static_path = os.path.join(frontend_path, "static")
+            if os.path.exists(static_path):
+                app.mount("/static", StaticFiles(directory=static_path), name="static")
+                logger.debug(f"Static assets mounted from: {static_path}")
+        else:
+            logger.warning(f"Frontend directory not found: {frontend_path}")
+    except Exception as exc:
+        logger.error("Startup init failed: %s", exc, exc_info=True)
+        app.state.startup_error = str(exc)
+        # Still mark ready so the /ready endpoint surfaces the error rather than
+        # leaving the frontend stuck on "Starting up" forever.
+        app.state.is_ready = True
+        poller_task = asyncio.create_task(_schedule_poller())
+        sync_task = asyncio.create_task(_turso_sync_poller())
+        yield
+        app.state.is_ready = False
+        poller_task.cancel()
+        sync_task.cancel()
+        return
 
     # Start automation schedule poller + periodic Turso sync
     poller_task = asyncio.create_task(_schedule_poller())
@@ -678,6 +694,9 @@ async def ready(request: Request):
     is_ready = bool(getattr(request.app.state, "is_ready", False))
     if not is_ready:
         return JSONResponse({"status": "starting"}, status_code=503)
+    startup_error = getattr(request.app.state, "startup_error", None)
+    if startup_error:
+        return JSONResponse({"status": "ready", "warning": startup_error}, status_code=200)
     return {"status": "ready"}
 
 
